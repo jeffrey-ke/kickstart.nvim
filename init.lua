@@ -102,7 +102,7 @@ vim.g.have_nerd_font = false
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -175,6 +175,8 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
+vim.keymap.set('n', '^', '$')
+vim.keymap.set('n', '$', '^')
 
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
@@ -248,6 +250,7 @@ rtp:prepend(lazypath)
 require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
+  'tpope/vim-fugitive',
 
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
@@ -671,7 +674,26 @@ require('lazy').setup({
       --  - settings (table): Override the default settings passed when initializing the server.
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
-        -- clangd = {},
+        clangd = {
+          cmd = {
+            'clangd',
+            '--background-index',
+            '--clang-tidy',
+            '--header-insertion=iwyu',
+            '--completion-style=detailed',
+            '--function-arg-placeholders',
+            '--fallback-style=llvm',
+          },
+          init_options = {
+            usePlaceholders = true,
+            completeUnimported = true,
+            clangdFileStatus = true,
+          },
+          root_dir = function(fname)
+            return require('lspconfig.util').root_pattern('Makefile', 'configure.in', 'configure.ac', '.git')(fname)
+              or require('lspconfig.util').path.dirname(fname)
+          end,
+        },
         -- gopls = {},
         -- pyright = {},
         -- rust_analyzer = {},
@@ -733,6 +755,33 @@ require('lazy').setup({
           end,
         },
       }
+
+      -- Toggle clangd LSP command
+      vim.api.nvim_create_user_command('ToggleClangd', function()
+        local clients = vim.lsp.get_clients { name = 'clangd' }
+
+        if #clients > 0 then
+          -- Clangd is running, stop it
+          for _, client in pairs(clients) do
+            vim.lsp.stop_client(client.id)
+          end
+          vim.notify('Clangd stopped', vim.log.levels.INFO)
+        else
+          -- Clangd is not running, start it
+          local bufnr = vim.api.nvim_get_current_buf()
+          local filetype = vim.bo[bufnr].filetype
+
+          if filetype == 'c' or filetype == 'cpp' or filetype == 'objc' or filetype == 'objcpp' then
+            require('lspconfig').clangd.setup(servers.clangd or {})
+            vim.defer_fn(function()
+              vim.cmd 'LspStart clangd'
+            end, 100)
+            vim.notify('Clangd started', vim.log.levels.INFO)
+          else
+            vim.notify('Not a C/C++ file', vim.log.levels.WARN)
+          end
+        end
+      end, { desc = 'Toggle clangd LSP on/off' })
     end,
   },
 
@@ -835,7 +884,9 @@ require('lazy').setup({
         -- <c-k>: Toggle signature help
         --
         -- See :h blink-cmp-config-keymap for defining your own keymap
-        preset = 'default',
+        preset = 'enter',
+        -- ['<C-j>'] = { 'select_next', 'fallback' },
+        -- ['<C-k>'] = { 'select_prev', 'fallback' },
 
         -- For more advanced Luasnip keymaps (e.g. selecting choice nodes, expansion) see:
         --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
@@ -977,14 +1028,13 @@ require('lazy').setup({
   -- require 'kickstart.plugins.indent_line',
   -- require 'kickstart.plugins.lint',
   -- require 'kickstart.plugins.autopairs',
-  -- require 'kickstart.plugins.neo-tree',
+  require 'kickstart.plugins.neo-tree',
   -- require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
-
   -- NOTE: The import below can automatically add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
   --    This is the easiest way to modularize your config.
   --
   --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
-  -- { import = 'custom.plugins' },
+  { import = 'custom.plugins' },
   --
   -- For additional information with loading, sourcing and examples see `:help lazy.nvim-🔌-plugin-spec`
   -- Or use telescope!
