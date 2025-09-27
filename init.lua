@@ -756,6 +756,32 @@ require('lazy').setup({
         },
       }
 
+      -- Safety autocommand to detach clangd from git buffers if it somehow attaches
+      vim.api.nvim_create_autocmd({ 'BufEnter', 'FileType' }, {
+        group = vim.api.nvim_create_augroup('git-lsp-prevention', { clear = true }),
+        callback = function(event)
+          local bufnr = event.buf
+          local bufname = vim.api.nvim_buf_get_name(bufnr)
+          local filetype = vim.bo[bufnr].filetype
+          local buftype = vim.bo[bufnr].buftype
+
+          -- Check if this is a git buffer that clangd shouldn't handle
+          local is_git_buffer = bufname:match '^fugitive://'
+            or vim.tbl_contains({ 'fugitive', 'fugitiveblame', 'git', 'gitcommit', 'gitrebase', 'gitconfig' }, filetype)
+            or buftype ~= ''
+            or bufname:match '/.git/'
+            or bufname:match '%.git/MERGE_MSG'
+            or bufname:match '%.git/COMMIT_EDITMSG'
+
+          if is_git_buffer then
+            local clients = vim.lsp.get_clients { bufnr = bufnr, name = 'clangd' }
+            for _, client in pairs(clients) do
+              vim.lsp.buf_detach_client(bufnr, client.id)
+            end
+          end
+        end,
+      })
+
       -- Toggle clangd LSP command
       vim.api.nvim_create_user_command('ToggleClangd', function()
         local clients = vim.lsp.get_clients { name = 'clangd' }
