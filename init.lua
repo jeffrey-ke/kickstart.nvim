@@ -1046,6 +1046,76 @@ require('lazy').setup({
       },
       indent = { enable = true, disable = { 'ruby' } },
     },
+    config = function(_, opts)
+      -- Standard treesitter setup
+      require('nvim-treesitter.configs').setup(opts)
+
+      -- Custom fold queries for functions + blocks within functions (but not classes)
+      local function setup_custom_fold_queries()
+        local languages = {
+          python = [[
+            (function_definition) @fold
+            (if_statement) @fold
+            (for_statement) @fold
+            (while_statement) @fold
+            (try_statement) @fold
+            (with_statement) @fold
+          ]],
+          typescript = [[
+            (function_declaration) @fold
+            (method_definition) @fold
+            (if_statement) @fold
+            (for_statement) @fold
+            (while_statement) @fold
+            (switch_statement) @fold
+          ]],
+          javascript = [[
+            (function_declaration) @fold
+            (method_definition) @fold
+            (if_statement) @fold
+            (for_statement) @fold
+            (while_statement) @fold
+            (switch_statement) @fold
+          ]],
+          lua = [[
+            (function_declaration) @fold
+            (if_statement) @fold
+            (for_statement) @fold
+            (while_statement) @fold
+            (repeat_statement) @fold
+          ]],
+          c = [[
+            (function_definition) @fold
+            (if_statement) @fold
+            (for_statement) @fold
+            (while_statement) @fold
+            (switch_statement) @fold
+          ]],
+          cpp = [[
+            (function_definition) @fold
+            (if_statement) @fold
+            (for_statement) @fold
+            (while_statement) @fold
+            (switch_statement) @fold
+          ]],
+        }
+
+        -- Apply custom fold queries using correct API
+        for lang, query in pairs(languages) do
+          local ok, _ = pcall(require, 'nvim-treesitter.parsers')
+          if ok and require('nvim-treesitter.parsers').has_parser(lang) then
+            local ok_query, _ = pcall(vim.treesitter.query.set, lang, 'folds', query)
+            if not ok_query then
+              -- Fallback: try alternative API
+              pcall(vim.treesitter.query.set_query, lang, 'folds', query)
+            end
+          end
+        end
+      end
+
+      -- Setup after a delay to ensure treesitter is fully loaded
+      vim.defer_fn(setup_custom_fold_queries, 100)
+    end,
     -- There are additional nvim-treesitter modules that you can use to interact
     -- with nvim-treesitter. You should go explore a few and see what interests you:
     --
