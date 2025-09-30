@@ -241,6 +241,30 @@ end
 local rtp = vim.opt.rtp
 rtp:prepend(lazypath)
 
+-- function to update pyright with a new conda env
+local function set_conda_env(env)
+  local home = os.getenv 'HOME'
+  local python_path = home .. '/miniconda3/envs/' .. env .. '/bin/python'
+
+  -- update pyright config
+  require('lspconfig').pyright.setup {
+    settings = {
+      python = {
+        pythonPath = python_path,
+      },
+    },
+  }
+
+  vim.notify('Pyright now using conda env: ' .. env, vim.log.levels.INFO)
+end
+
+-- make it callable from command mode
+vim.api.nvim_create_user_command('SetCondaEnv', function(opts)
+  set_conda_env(opts.args)
+  -- restart LSP so new settings take effect
+  vim.cmd 'LspRestart'
+end, { nargs = 1 })
+
 -- [[ Configure and install plugins ]]
 --
 --  To check the current status of your plugins, run
