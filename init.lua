@@ -226,6 +226,15 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   end,
 })
 
+-- Disable automatic reindentation when typing ':'
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = '*',
+  callback = function()
+    vim.opt_local.cinkeys:remove(':')
+    vim.opt_local.indentkeys:remove(':')
+  end,
+})
+
 -- [[ Install `lazy.nvim` plugin manager ]]
 --    See `:help lazy.nvim.txt` or https://github.com/folke/lazy.nvim for more info
 local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'
