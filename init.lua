@@ -268,9 +268,9 @@ local function set_conda_env(env)
 end
 
 -- make it callable from command mode
-vim.api.nvim_create_user_command('SetCondaEnv', function(opts)
+vim.api.nvim_create_user_command('Env', function(opts)
+  vim.cmd 'LspRestart'
   set_conda_env(opts.args)
-  -- restart LSP so new settings take effect
   vim.cmd 'LspRestart'
 end, { nargs = 1 })
 
