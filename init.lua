@@ -180,8 +180,8 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
-vim.keymap.set('n', '^', '$')
-vim.keymap.set('n', '$', '^')
+vim.keymap.set({ 'n', 'o' }, '^', '$')
+vim.keymap.set({ 'n', 'o' }, '$', '^')
 
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
@@ -230,8 +230,8 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 vim.api.nvim_create_autocmd('FileType', {
   pattern = '*',
   callback = function()
-    vim.opt_local.cinkeys:remove(':')
-    vim.opt_local.indentkeys:remove(':')
+    vim.opt_local.cinkeys:remove ':'
+    vim.opt_local.indentkeys:remove ':'
   end,
 })
 
