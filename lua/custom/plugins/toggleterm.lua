@@ -13,7 +13,7 @@ return {
         end
         return 20
       end,
-      open_mapping = [[<C-\>]], -- global toggle (works in normal/insert/term)
+      -- open_mapping = [[<C-\>]], -- global toggle (works in normal/insert/term)
       shade_terminals = true,
       start_in_insert = true,
       persist_size = true,
