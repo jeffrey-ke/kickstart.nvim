@@ -198,9 +198,9 @@ vim.keymap.set('n', '<leader>p', '`[v`]', { desc = 'Select [P]asted text' })
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
 --
--- NOTE: This won't work in all terminal emulators/tmux/etc. Try your own mapping
--- or just use <C-\><C-n> to exit terminal mode
-vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
+-- NOTE: Using 'jk' instead of <Esc><Esc> to avoid conflicts with Claude Code
+-- which uses <Esc><Esc> for its rewind menu. You can still use <C-\><C-n> directly.
+vim.keymap.set('t', 'jk', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
 
 -- TIP: Disable arrow keys in normal mode
 -- vim.keymap.set('n', '<left>', '<cmd>echo "Use h to move!!"<CR>')
