@@ -191,6 +191,20 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
+
+-- Toggle diagnostics visibility
+local diagnostics_active = true
+local function toggle_diagnostics()
+  diagnostics_active = not diagnostics_active
+  vim.diagnostic.enable(diagnostics_active)
+  if diagnostics_active then
+    vim.notify('Diagnostics enabled', vim.log.levels.INFO)
+  else
+    vim.notify('Diagnostics disabled', vim.log.levels.INFO)
+  end
+end
+vim.keymap.set('n', '<leader>td', toggle_diagnostics, { desc = '[T]oggle [D]iagnostics' })
+
 vim.keymap.set({ 'n', 'o', 'v' }, '^', '$')
 vim.keymap.set({ 'n', 'o', 'v' }, '$', '^')
 
