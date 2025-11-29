@@ -94,6 +94,9 @@ vim.g.maplocalleader = ' '
 vim.g.have_nerd_font = false
 
 -- [[ Setting options ]]
+-- Enable 24-bit RGB colors in the terminal
+vim.o.termguicolors = true
+
 -- See `:help vim.o`
 -- NOTE: You can change these options as you wish!
 --  For more options, you can see `:help option-list`
