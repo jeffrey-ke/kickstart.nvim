@@ -119,17 +119,36 @@ vim.o.showmode = false
 --  See `:help 'clipboard'`
 vim.schedule(function()
   vim.o.clipboard = 'unnamedplus'
-  vim.g.clipboard = {
-    name = 'OSC 52',
-    copy = {
-      ['+'] = require('vim.ui.clipboard.osc52').copy '+',
-      ['*'] = require('vim.ui.clipboard.osc52').copy '*',
-    },
-    paste = {
-      ['+'] = require('vim.ui.clipboard.osc52').paste '+',
-      ['*'] = require('vim.ui.clipboard.osc52').paste '*',
-    },
-  }
+
+  if vim.env.SSH_TTY then
+    local function paste()
+      return { vim.fn.split(vim.fn.getreg '', '\n'), vim.fn.getregtype '' }
+    end
+    vim.g.clipboard = {
+      name = 'OSC 52',
+      copy = {
+        ['+'] = require('vim.ui.clipboard.osc52').copy '+',
+        ['*'] = require('vim.ui.clipboard.osc52').copy '*',
+      },
+      paste = {
+        ['+'] = paste,
+        ['*'] = paste,
+      },
+    }
+  else
+    vim.g.clipboard = {
+      name = 'xclip',
+      copy = {
+        ['+'] = 'xclip -quiet -selection clipboard',
+        ['*'] = 'xclip -quiet -selection primary',
+      },
+      paste = {
+        ['+'] = 'xclip -selection clipboard -o',
+        ['*'] = 'xclip -selection primary -o',
+      },
+      cache_enabled = false,
+    }
+  end
 end)
 
 -- Enable break indent
