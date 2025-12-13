@@ -136,18 +136,8 @@ vim.schedule(function()
       },
     }
   else
-    vim.g.clipboard = {
-      name = 'xclip',
-      copy = {
-        ['+'] = 'xclip -quiet -selection clipboard',
-        ['*'] = 'xclip -quiet -selection primary',
-      },
-      paste = {
-        ['+'] = 'xclip -selection clipboard -o',
-        ['*'] = 'xclip -selection primary -o',
-      },
-      cache_enabled = false,
-    }
+    -- Neovim will auto-detect xsel (preferred) or xclip if available.
+    -- No manual configuration needed - the clipboard provider handles this automatically.
   end
 end)
 
