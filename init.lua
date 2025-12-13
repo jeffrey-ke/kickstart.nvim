@@ -299,6 +299,65 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
     end
   end,
 })
+
+-- [[ Make Configuration ]]
+-- Configure :make to run linters per filetype, populating the quickfix list
+vim.api.nvim_create_augroup('make-config', { clear = true })
+
+-- Python: use pylint for warnings (unused vars, bad patterns) and pyright for type errors
+-- Pylint with --disable=E,R,C shows only W (warnings) and F (fatal)
+-- Pyright handles E-level issues (undefined variables, type mismatches)
+vim.api.nvim_create_autocmd('FileType', {
+  group = 'make-config',
+  pattern = 'python',
+  callback = function()
+    vim.bo.makeprg = 'pyright %'
+    vim.bo.errorformat = '%\\ %#%f:%l:%c - %trror: %m,%\\ %#%f:%l:%c - %tarning: %m,%-G%.%#'
+  end,
+})
+
+-- Helper function to get all open Python buffer paths
+local function get_python_buffers()
+  local paths = {}
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].filetype == 'python' then
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name ~= '' and vim.fn.filereadable(name) == 1 then
+        table.insert(paths, vim.fn.shellescape(name))
+      end
+    end
+  end
+  return table.concat(paths, ' ')
+end
+
+-- Custom :Make command for Python that lints all open Python buffers
+vim.api.nvim_create_user_command('Make', function()
+  local python_files = get_python_buffers()
+  if python_files == '' then
+    vim.notify('No Python buffers open', vim.log.levels.WARN)
+    return
+  end
+  local cmd = 'pyright ' .. python_files
+  vim.opt.errorformat = '%\\ %#%f:%l:%c - %trror: %m,%\\ %#%f:%l:%c - %tarning: %m,%-G%.%#'
+  vim.cmd('cexpr system("' .. cmd:gsub('"', '\\"') .. '")')
+  vim.cmd 'copen'
+end, { desc = 'Run pylint and pyright on all open Python buffers' })
+
+-- C/C++: use the compiler directly (errors will populate quickfix)
+-- Note: For more advanced static analysis, consider adding cppcheck or clang-tidy
+vim.api.nvim_create_autocmd('FileType', {
+  group = 'make-config',
+  pattern = { 'c', 'cpp' },
+  callback = function()
+    -- Uses gcc/g++ by default; adjust if you have a Makefile
+    local compiler = vim.bo.filetype == 'cpp' and 'g++' or 'gcc'
+    vim.bo.makeprg = compiler .. ' -Wall -Wextra -fsyntax-only %'
+    vim.bo.errorformat = '%f:%l:%c: %t%*[^:]: %m,%f:%l: %t%*[^:]: %m'
+  end,
+})
+
+-- [[ Custom Commands ]]
+
 -- Close all buffers except current (skip terminals)
 vim.api.nvim_create_user_command('Bon', function()
   local current_buf = vim.api.nvim_get_current_buf()
