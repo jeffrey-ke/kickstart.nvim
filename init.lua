@@ -299,6 +299,24 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
     end
   end,
 })
+-- Close all buffers except current (skip terminals)
+vim.api.nvim_create_user_command('Bon', function()
+  local current_buf = vim.api.nvim_get_current_buf()
+
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    -- Only process listed buffers
+    if vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].buflisted then
+      -- Skip the current buffer
+      if buf ~= current_buf then
+        -- Skip terminal buffers
+        if vim.bo[buf].buftype ~= 'terminal' then
+          -- Delete the buffer (using pcall to handle errors silently)
+          pcall(vim.api.nvim_buf_delete, buf, { force = false })
+        end
+      end
+    end
+  end
+end, { desc = 'Close all buffers except current (skip terminals)' })
 -- [[ Install `lazy.nvim` plugin manager ]]
 --    See `:help lazy.nvim.txt` or https://github.com/folke/lazy.nvim for more info
 local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'
