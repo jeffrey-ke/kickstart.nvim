@@ -1133,6 +1133,12 @@ require('lazy').setup({
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
       vim.cmd.colorscheme 'tokyonight-night'
+
+      -- Configure window separators to be more opaque (white)
+      -- WinSeparator controls vertical splits (modern, Neovim 0.7+)
+      vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', bg = 'NONE' })
+      -- VertSplit for backward compatibility (pre-Neovim 0.7)
+      vim.api.nvim_set_hl(0, 'VertSplit', { fg = '#ffffff', bg = 'NONE' })
     end,
   },
 
@@ -1171,6 +1177,9 @@ require('lazy').setup({
       statusline.section_location = function()
         return '%2l:%-2v'
       end
+
+      -- Override StatusLineNC after mini.statusline setup to make horizontal separators white
+      vim.api.nvim_set_hl(0, 'StatusLineNC', { fg = '#ffffff', bg = '#ffffff' })
 
       -- ... and there is more!
       --  Check out: https://github.com/echasnovski/mini.nvim
