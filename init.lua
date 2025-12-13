@@ -201,6 +201,10 @@ vim.o.confirm = true
 
 -- Folding configuration
 vim.opt.foldmethod = 'indent'
+
+-- Automatically reload files changed outside of nvim
+vim.o.autoread = true
+
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
 
