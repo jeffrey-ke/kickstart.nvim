@@ -218,8 +218,9 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
--- Toggle diagnostics visibility
-local diagnostics_active = true
+-- Diagnostics disabled by default - use :make or :Make to check errors
+local diagnostics_active = false
+vim.diagnostic.enable(false)
 local function toggle_diagnostics()
   diagnostics_active = not diagnostics_active
   vim.diagnostic.enable(diagnostics_active)
@@ -844,6 +845,7 @@ require('lazy').setup({
           end,
         },
         -- gopls = {},
+        pyright = {},
         bashls = {},
         -- rust_analyzer = {},
         -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
