@@ -194,6 +194,9 @@ vim.o.cursorline = true
 -- Minimal number of screen lines to keep above and below the cursor.
 vim.o.scrolloff = 2
 
+-- Always show status line for all windows (acts as horizontal separator)
+vim.opt.laststatus = 2
+
 -- if performing an operation that would fail due to unsaved changes in the buffer (like `:q`),
 -- instead raise a dialog asking if you wish to save the current file(s)
 -- See `:help 'confirm'`
@@ -376,6 +379,7 @@ vim.api.nvim_create_user_command('Bon', function()
     end
   end
 end, { desc = 'Close all buffers except current (skip terminals)' })
+
 -- [[ Install `lazy.nvim` plugin manager ]]
 --    See `:help lazy.nvim.txt` or https://github.com/folke/lazy.nvim for more info
 local lazypath = vim.fn.stdpath 'data' .. '/lazy/lazy.nvim'
@@ -390,30 +394,6 @@ end
 ---@type vim.Option
 local rtp = vim.opt.rtp
 rtp:prepend(lazypath)
-
--- function to update pyright with a new conda env
-local function set_conda_env(env)
-  local home = os.getenv 'HOME'
-  local python_path = home .. '/miniconda3/envs/' .. env .. '/bin/python'
-
-  -- update pyright config
-  require('lspconfig').pyright.setup {
-    settings = {
-      python = {
-        pythonPath = python_path,
-      },
-    },
-  }
-
-  vim.notify('Pyright now using conda env: ' .. env, vim.log.levels.INFO)
-end
-
--- make it callable from command mode
-vim.api.nvim_create_user_command('Env', function(opts)
-  vim.cmd 'LspRestart'
-  set_conda_env(opts.args)
-  vim.cmd 'LspRestart'
-end, { nargs = 1 })
 
 -- [[ Configure and install plugins ]]
 --
@@ -542,6 +522,7 @@ require('lazy').setup({
 
   { -- Fuzzy Finder (files, lsp, etc)
     'nvim-telescope/telescope.nvim',
+    enabled = false,
     event = 'VimEnter',
     dependencies = {
       'nvim-lua/plenary.nvim',
@@ -732,34 +713,17 @@ require('lazy').setup({
           -- or a suggestion from your LSP for this to activate.
           map('gra', vim.lsp.buf.code_action, '[G]oto Code [A]ction', { 'n', 'x' })
 
-          -- Find references for the word under your cursor.
-          map('grr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
-
-          -- Jump to the implementation of the word under your cursor.
-          --  Useful when your language has ways of declaring types without an actual implementation.
-          map('gri', require('telescope.builtin').lsp_implementations, '[G]oto [I]mplementation')
-
-          -- Jump to the definition of the word under your cursor.
-          --  This is where a variable was first declared, or where a function is defined, etc.
-          --  To jump back, press <C-t>.
-          map('grd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
-
-          -- WARN: This is not Goto Definition, this is Goto Declaration.
-          --  For example, in C this would take you to the header.
           map('grD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
 
-          -- Fuzzy find all the symbols in your current document.
-          --  Symbols are things like variables, functions, types, etc.
-          map('gO', require('telescope.builtin').lsp_document_symbols, 'Open Document Symbols')
-
-          -- Fuzzy find all the symbols in your current workspace.
-          --  Similar to document symbols, except searches over your entire project.
-          map('gW', require('telescope.builtin').lsp_dynamic_workspace_symbols, 'Open Workspace Symbols')
-
-          -- Jump to the type of the word under your cursor.
-          --  Useful when you're not sure what type a variable is and you want to see
-          --  the definition of its *type*, not where it was *defined*.
-          map('grt', require('telescope.builtin').lsp_type_definitions, '[G]oto [T]ype Definition')
+          local has_telescope, telescope_builtin = pcall(require, 'telescope.builtin')
+          if has_telescope then
+            map('grr', telescope_builtin.lsp_references, '[G]oto [R]eferences')
+            map('gri', telescope_builtin.lsp_implementations, '[G]oto [I]mplementation')
+            map('grd', telescope_builtin.lsp_definitions, '[G]oto [D]efinition')
+            map('gO', telescope_builtin.lsp_document_symbols, 'Open Document Symbols')
+            map('gW', telescope_builtin.lsp_dynamic_workspace_symbols, 'Open Workspace Symbols')
+            map('grt', telescope_builtin.lsp_type_definitions, '[G]oto [T]ype Definition')
+          end
 
           -- This function resolves a difference between neovim nightly (version 0.11) and stable (version 0.10)
           ---@param client vim.lsp.Client
@@ -881,7 +845,6 @@ require('lazy').setup({
           end,
         },
         -- gopls = {},
-        pyright = {},
         bashls = {},
         -- rust_analyzer = {},
         -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
@@ -1119,9 +1082,19 @@ require('lazy').setup({
       },
 
       sources = {
-        default = { 'lsp', 'path', 'snippets', 'lazydev' },
+        default = { 'lsp', 'path', 'snippets', 'buffer', 'lazydev' },
         providers = {
           lazydev = { module = 'lazydev.integrations.blink', score_offset = 100 },
+          buffer = {
+            score_offset = -5,
+            opts = {
+              get_bufnrs = function()
+                return vim.tbl_filter(function(bufnr)
+                  return vim.bo[bufnr].buflisted and vim.api.nvim_buf_is_loaded(bufnr)
+                end, vim.api.nvim_list_bufs())
+              end,
+            },
+          },
         },
       },
 
