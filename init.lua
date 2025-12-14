@@ -97,12 +97,12 @@ vim.g.have_nerd_font = true
 -- Enable 24-bit RGB colors in the terminal
 vim.o.termguicolors = true
 
--- [[ Wildmenu Configuration ]]
--- Enhanced command-line completion
-vim.o.wildmenu = true
-vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
-vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
-vim.o.wildignorecase = true -- Case-insensitive command-line completion
+-- -- [[ Wildmenu Configuration ]]
+-- -- Enhanced command-line completion
+-- vim.o.wildmenu = true
+-- vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
+-- vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
+-- vim.o.wildignorecase = true -- Case-insensitive command-line completion
 
 -- See `:help vim.o`
 -- NOTE: You can change these options as you wish!
@@ -352,6 +352,25 @@ require('lazy').setup({
   'tpope/vim-fugitive',
   'tpope/vim-eunuch',
 
+  {
+    'gelguy/wilder.nvim',
+    config = function()
+      local wilder = require 'wilder'
+      wilder.setup {
+        modes = { ':', '/', '?' },
+      }
+      wilder.set_option(
+        'renderer',
+        wilder.popupmenu_renderer {
+          highlighter = wilder.basic_highlighter(),
+          left = { ' ', wilder.popupmenu_devicons() },
+          right = { ' ', wilder.popupmenu_scrollbar() },
+          highlighter = wilder.basic_highlighter(),
+          pumblend = 20,
+        }
+      )
+    end,
+  },
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
   -- keys can be used to configure plugin behavior/loading/etc.
