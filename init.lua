@@ -358,7 +358,22 @@ require('lazy').setup({
       local wilder = require 'wilder'
       wilder.setup {
         modes = { ':', '/', '?' },
+        -- Don't use accept_key - we'll make a custom mapping below
       }
+      wilder.set_option('noselect', 0) -- Auto-select first item
+
+      -- Custom CR: accept completion then execute
+      vim.keymap.set('c', '<CR>', function()
+        if vim.fn['wilder#in_context']() == 1 and vim.fn['wilder#can_accept_completion']() == 1 then
+          vim.fn['wilder#accept_completion']()
+          -- Schedule CR after cmdline updates
+          vim.schedule(function()
+            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'n', false)
+          end)
+          return ''
+        end
+        return vim.api.nvim_replace_termcodes('<CR>', true, false, true)
+      end, { expr = true })
       wilder.set_option(
         'renderer',
         wilder.popupmenu_renderer {
