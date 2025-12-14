@@ -362,6 +362,19 @@ require('lazy').setup({
       }
       wilder.set_option('noselect', 0) -- Auto-select first item
 
+      -- Skip wilder for :w (just returns nothing, so normal :w executes)
+      wilder.set_option('pipeline', {
+        wilder.branch(
+          {
+            wilder.check(function(ctx, x)
+              return x == 'w' or x == 'q'
+            end),
+          },
+          wilder.cmdline_pipeline(),
+          wilder.search_pipeline()
+        ),
+      })
+
       -- Custom CR: accept completion then execute
       vim.keymap.set('c', '<CR>', function()
         if vim.fn['wilder#in_context']() == 1 and vim.fn['wilder#can_accept_completion']() == 1 then
