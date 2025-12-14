@@ -97,6 +97,13 @@ vim.g.have_nerd_font = true
 -- Enable 24-bit RGB colors in the terminal
 vim.o.termguicolors = true
 
+-- [[ Wildmenu Configuration ]]
+-- Enhanced command-line completion
+vim.o.wildmenu = true
+vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
+vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
+vim.o.wildignorecase = true -- Case-insensitive command-line completion
+
 -- See `:help vim.o`
 -- NOTE: You can change these options as you wish!
 --  For more options, you can see `:help option-list`
@@ -401,6 +408,7 @@ require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
   'tpope/vim-fugitive',
+  'tpope/vim-eunuch',
 
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
