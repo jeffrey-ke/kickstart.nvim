@@ -1065,7 +1065,7 @@ require('lazy').setup({
         providers = {
           lazydev = { module = 'lazydev.integrations.blink', score_offset = 100 },
           buffer = {
-            score_offset = -5,
+            score_offset = 10,
             opts = {
               get_bufnrs = function()
                 return vim.tbl_filter(function(bufnr)
