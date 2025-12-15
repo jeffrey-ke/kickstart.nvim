@@ -97,9 +97,9 @@ vim.g.have_nerd_font = true
 -- Enable 24-bit RGB colors in the terminal
 vim.o.termguicolors = true
 
--- -- [[ Wildmenu Configuration ]]
--- -- Enhanced command-line completion
--- vim.o.wildmenu = true
+-- [[ Wildmenu Configuration ]]
+-- Disable native wildmenu since wilder.nvim replaces it
+vim.o.wildmenu = false
 -- vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
 -- vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
 -- vim.o.wildignorecase = true -- Case-insensitive command-line completion
@@ -356,30 +356,22 @@ require('lazy').setup({
     'gelguy/wilder.nvim',
     config = function()
       local wilder = require 'wilder'
-      wilder.setup {
-        modes = { ':', '/', '?' },
-        -- Don't use accept_key - we'll make a custom mapping below
-      }
+      wilder.setup { modes = { ':', '/', '?' } }
       wilder.set_option('noselect', 0) -- Auto-select first item
 
-      -- Skip wilder for :w (just returns nothing, so normal :w executes)
+      -- Skip wilder for :w and :q
       wilder.set_option('pipeline', {
-        wilder.branch(
-          {
-            wilder.check(function(ctx, x)
-              return x == 'w' or x == 'q'
-            end),
-          },
-          wilder.cmdline_pipeline(),
-          wilder.search_pipeline()
-        ),
+        wilder.branch({
+          wilder.check(function(ctx, x)
+            return x == 'w' or x == 'q'
+          end),
+        }, wilder.cmdline_pipeline(), wilder.search_pipeline()),
       })
 
       -- Custom CR: accept completion then execute
       vim.keymap.set('c', '<CR>', function()
         if vim.fn['wilder#in_context']() == 1 and vim.fn['wilder#can_accept_completion']() == 1 then
           vim.fn['wilder#accept_completion']()
-          -- Schedule CR after cmdline updates
           vim.schedule(function()
             vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'n', false)
           end)
@@ -387,14 +379,13 @@ require('lazy').setup({
         end
         return vim.api.nvim_replace_termcodes('<CR>', true, false, true)
       end, { expr = true })
+
       wilder.set_option(
         'renderer',
         wilder.popupmenu_renderer {
           highlighter = wilder.basic_highlighter(),
           left = { ' ', wilder.popupmenu_devicons() },
           right = { ' ', wilder.popupmenu_scrollbar() },
-          highlighter = wilder.basic_highlighter(),
-          pumblend = 20,
         }
       )
     end,
@@ -1099,6 +1090,9 @@ require('lazy').setup({
 
       -- Shows a signature help window while you type arguments for a function
       signature = { enabled = true },
+
+      -- Disable cmdline completion (let wilder.nvim handle it)
+      cmdline = { enabled = false },
     },
   },
 
