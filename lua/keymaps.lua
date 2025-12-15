@@ -65,3 +65,4 @@ vim.keymap.set('n', '<leader>k', '<C-w><C-k>', { desc = 'Move focus to the upper
 
 vim.keymap.set('n', '<leader>ti', 'i#type: ignore<Esc>', { desc = 'Insert #type: ignore on the line' })
 
+vim.keymap.set('n', 'g;', 'g;zz')
