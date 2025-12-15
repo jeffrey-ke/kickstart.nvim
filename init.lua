@@ -356,7 +356,11 @@ require('lazy').setup({
     'gelguy/wilder.nvim',
     config = function()
       local wilder = require 'wilder'
-      wilder.setup { modes = { ':', '/', '?' } }
+      wilder.setup {
+        modes = { ':', '/', '?' },
+        next_key = '<C-j>',
+        previous_key = '<C-k>',
+      }
       wilder.set_option('noselect', 0) -- Auto-select first item
 
       -- Skip wilder for :w and :q
