@@ -361,11 +361,15 @@ require('lazy').setup({
 
       -- Skip wilder for :w and :q
       wilder.set_option('pipeline', {
-        wilder.branch({
-          wilder.check(function(ctx, x)
-            return x == 'w' or x == 'q'
-          end),
-        }, wilder.cmdline_pipeline(), wilder.search_pipeline()),
+        wilder.branch(
+          {
+            wilder.check(function(ctx, x)
+              return x == 'w' or x == 'q'
+            end),
+          },
+          wilder.cmdline_pipeline(),
+          wilder.search_pipeline()
+        ),
       })
 
       -- Custom CR: accept completion then execute
