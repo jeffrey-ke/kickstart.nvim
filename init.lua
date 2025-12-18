@@ -127,7 +127,24 @@ vim.o.showmode = false
 vim.schedule(function()
   vim.o.clipboard = 'unnamedplus'
 
-  if vim.env.SSH_TTY then
+  -- Detect SSH session (SSH_TTY often doesn't propagate into tmux)
+  local function is_ssh_session()
+    if vim.env.SSH_TTY or vim.env.SSH_CONNECTION or vim.env.SSH_CLIENT then
+      return true
+    end
+    -- Check tmux's environment if we're in tmux
+    if vim.env.TMUX then
+      local handle = io.popen 'tmux show-environment SSH_TTY 2>/dev/null'
+      if handle then
+        local result = handle:read '*a'
+        handle:close()
+        return result and not result:match '^-' -- '-SSH_TTY' means unset
+      end
+    end
+    return false
+  end
+
+  if is_ssh_session() then
     local function paste()
       return { vim.fn.split(vim.fn.getreg '', '\n'), vim.fn.getregtype '' }
     end
@@ -361,32 +378,6 @@ require('lazy').setup({
         next_key = '<C-j>',
         previous_key = '<C-k>',
       }
-      wilder.set_option('noselect', 0) -- Auto-select first item
-
-      -- Skip wilder for :w and :q
-      wilder.set_option('pipeline', {
-        wilder.branch(
-          {
-            wilder.check(function(ctx, x)
-              return x == 'w' or x == 'q'
-            end),
-          },
-          wilder.cmdline_pipeline(),
-          wilder.search_pipeline()
-        ),
-      })
-
-      -- Custom CR: accept completion then execute
-      vim.keymap.set('c', '<CR>', function()
-        if vim.fn['wilder#in_context']() == 1 and vim.fn['wilder#can_accept_completion']() == 1 then
-          vim.fn['wilder#accept_completion']()
-          vim.schedule(function()
-            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'n', false)
-          end)
-          return ''
-        end
-        return vim.api.nvim_replace_termcodes('<CR>', true, false, true)
-      end, { expr = true })
 
       wilder.set_option(
         'renderer',
