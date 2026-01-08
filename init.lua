@@ -92,17 +92,16 @@ vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
 vim.g.have_nerd_font = true
+vim.cmd.packadd 'cfilter'
 
 -- [[ Setting options ]]
 -- Enable 24-bit RGB colors in the terminal
 vim.o.termguicolors = true
 
 -- [[ Wildmenu Configuration ]]
--- Disable native wildmenu since wilder.nvim replaces it
-vim.o.wildmenu = false
--- vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
--- vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
--- vim.o.wildignorecase = true -- Case-insensitive command-line completion
+vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
+vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
+vim.o.wildignorecase = true -- Case-insensitive command-line completion
 
 -- See `:help vim.o`
 -- NOTE: You can change these options as you wish!
@@ -368,27 +367,7 @@ require('lazy').setup({
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
   'tpope/vim-fugitive',
   'tpope/vim-eunuch',
-
-  {
-    'gelguy/wilder.nvim',
-    config = function()
-      local wilder = require 'wilder'
-      wilder.setup {
-        modes = { ':', '/', '?' },
-        next_key = '<C-j>',
-        previous_key = '<C-k>',
-      }
-
-      wilder.set_option(
-        'renderer',
-        wilder.popupmenu_renderer {
-          highlighter = wilder.basic_highlighter(),
-          left = { ' ', wilder.popupmenu_devicons() },
-          right = { ' ', wilder.popupmenu_scrollbar() },
-        }
-      )
-    end,
-  },
+  'tpope/vim-surround',
 
   {
     'folke/persistence.nvim',
@@ -1097,8 +1076,13 @@ require('lazy').setup({
       -- Shows a signature help window while you type arguments for a function
       signature = { enabled = true },
 
-      -- Disable cmdline completion (let wilder.nvim handle it)
-      cmdline = { enabled = false },
+      cmdline = {
+        enabled = true,
+        keymap = {
+          ['<C-j>'] = { 'select_next', 'fallback' },
+          ['<C-k>'] = { 'select_prev', 'fallback' },
+        },
+      },
     },
   },
 
