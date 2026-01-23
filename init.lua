@@ -1159,6 +1159,16 @@ require('lazy').setup({
         return '%2l:%-2v'
       end
 
+      -- Add PWD to statusline with bold colored font
+      vim.api.nvim_set_hl(0, 'StatusLinePwd', { fg = '#7dcfff', bold = true })
+      local original_active = statusline.active
+      ---@diagnostic disable-next-line: duplicate-set-field
+      statusline.active = function()
+        local pwd = vim.fn.getcwd()
+        local pwd_section = '%#StatusLinePwd# ' .. pwd .. ' %*'
+        return pwd_section .. original_active()
+      end
+
       -- Override StatusLineNC after mini.statusline setup to make horizontal separators white
       vim.api.nvim_set_hl(0, 'StatusLineNC', { fg = '#ffffff', bg = '#ffffff' })
 
