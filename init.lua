@@ -318,23 +318,32 @@ vim.api.nvim_create_autocmd('FileType', {
 -- [[ Custom Commands ]]
 
 -- Close all buffers except current (skip terminals)
-vim.api.nvim_create_user_command('Bon', function()
+vim.api.nvim_create_user_command('Bon', function(opts)
   local current_buf = vim.api.nvim_get_current_buf()
+  local exclusion_patterns = opts.fargs
+
+  local function matches_exclusion(bufname)
+    for _, pattern in ipairs(exclusion_patterns) do
+      if bufname:find(pattern, 1, true) then
+        return true
+      end
+    end
+    return false
+  end
 
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    -- Only process listed buffers
     if vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].buflisted then
-      -- Skip the current buffer
       if buf ~= current_buf then
-        -- Skip terminal buffers
         if vim.bo[buf].buftype ~= 'terminal' then
-          -- Delete the buffer (using pcall to handle errors silently)
-          pcall(vim.api.nvim_buf_delete, buf, { force = false })
+          local bufname = vim.api.nvim_buf_get_name(buf)
+          if not matches_exclusion(bufname) then
+            pcall(vim.api.nvim_buf_delete, buf, { force = false })
+          end
         end
       end
     end
   end
-end, { desc = 'Close all buffers except current (skip terminals)' })
+end, { nargs = '*', desc = 'Close all buffers except current and patterns (skip terminals)' })
 
 -- [[ Install `lazy.nvim` plugin manager ]]
 --    See `:help lazy.nvim.txt` or https://github.com/folke/lazy.nvim for more info
