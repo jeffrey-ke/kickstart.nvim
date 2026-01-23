@@ -71,6 +71,10 @@ vim.keymap.set('n', 'g;', 'g;zz')
 vim.cmd 'cnoreabbrev dp diffput'
 vim.cmd 'cnoreabbrev dg diffget'
 
+vim.api.nvim_create_user_command('Ghis', function()
+  vim.cmd 'G log --oneline --graph --decorate --all'
+end, { desc = 'Git history graph' })
+
 -- Session management with persistence.nvim
 vim.keymap.set('n', '<leader>qs', function()
   require('persistence').load()
