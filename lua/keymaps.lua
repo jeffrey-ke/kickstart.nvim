@@ -103,3 +103,24 @@ vim.keymap.set('n', ':', function()
 end, { expr = true, desc = 'Range N: as .,+N instead of +N-1' })
 
 vim.o.grepprg = 'rg --vimgrep'
+
+local function build_definition_pattern(word)
+  return '(function|def|class|local|const|let|var)\\s+' .. word
+end
+
+local function grep_and_open(pattern, dir)
+  vim.cmd { cmd = 'grep', args = { vim.fn.shellescape(pattern), dir }, bang = true }
+  vim.cmd 'copen'
+end
+
+vim.keymap.set('n', 'gD', function()
+  local word = vim.fn.expand '<cword>'
+  grep_and_open(build_definition_pattern(word), '.')
+end, { desc = 'Grep definition of word under cursor' })
+
+vim.api.nvim_create_user_command('Def', function(opts)
+  local args = vim.split(opts.args, '%s+')
+  local word = args[1] ~= '' and args[1] or vim.fn.expand '<cword>'
+  local dir = args[2] or '.'
+  grep_and_open(build_definition_pattern(word), dir)
+end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
