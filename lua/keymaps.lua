@@ -124,3 +124,8 @@ vim.api.nvim_create_user_command('Def', function(opts)
   local dir = args[2] or '.'
   grep_and_open(build_definition_pattern(word), dir)
 end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
+vim.api.nvim_create_user_command('Gr', function(opts)
+  local pattern = opts.args ~= '' and opts.args or vim.fn.expand '<cword>'
+  vim.cmd('silent grep! ' .. vim.fn.shellescape(pattern))
+  vim.cmd 'copen'
+end, { nargs = '?', desc = 'Grep (defaults to word under cursor)' })
