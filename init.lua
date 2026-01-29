@@ -379,6 +379,7 @@ require('lazy').setup({
   'tpope/vim-fugitive',
   'tpope/vim-eunuch',
   'tpope/vim-surround',
+  { 'ellisonleao/gruvbox.nvim', priority = 1000, config = true, opts = ... },
 
   {
     'folke/persistence.nvim',
@@ -1250,6 +1251,6 @@ require('lazy').setup({
     },
   },
 })
-
+vim.cmd [[colorscheme gruvbox]]
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
