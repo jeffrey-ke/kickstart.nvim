@@ -219,6 +219,7 @@ vim.o.confirm = true
 
 -- Folding configuration
 vim.opt.foldmethod = 'indent'
+vim.opt.foldlevelstart = 99
 
 -- Automatically reload files changed outside of nvim
 vim.o.autoread = true
