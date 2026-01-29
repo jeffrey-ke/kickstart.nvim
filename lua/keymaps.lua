@@ -110,8 +110,7 @@ local function build_definition_pattern(word)
 end
 
 local function grep_and_open(pattern, dir)
-  vim.cmd { cmd = 'grep', args = { vim.fn.shellescape(pattern), dir }, bang = true }
-  vim.cmd 'copen'
+  vim.cmd { cmd = 'grep', args = { vim.fn.shellescape(pattern), dir }, bang = false }
 end
 
 vim.keymap.set('n', 'gD', function()
