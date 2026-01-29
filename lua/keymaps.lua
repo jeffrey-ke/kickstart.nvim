@@ -70,6 +70,7 @@ vim.keymap.set('n', 'g;', 'g;zz')
 -- Diff command abbreviations
 vim.cmd 'cnoreabbrev dp diffput'
 vim.cmd 'cnoreabbrev dg diffget'
+vim.cmd 'cnoreabbrev D Def'
 
 vim.api.nvim_create_user_command('Ghis', function()
   vim.cmd 'G log --oneline --graph --decorate --all'
