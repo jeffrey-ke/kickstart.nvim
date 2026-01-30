@@ -67,7 +67,7 @@ vim.keymap.set('n', '<leader>ti', '$a#type: ignore<Esc>', { desc = 'Insert #type
 
 vim.keymap.set('n', 'g;', 'g;zz')
 
--- Diff command abbreviations
+-- Command abbreviations
 vim.cmd 'cnoreabbrev dp diffput'
 vim.cmd 'cnoreabbrev dg diffget'
 vim.cmd 'cnoreabbrev D Def'
@@ -104,14 +104,15 @@ vim.keymap.set('n', ':', function()
 end, { expr = true, desc = 'Range N: as .,+N instead of +N-1' })
 
 vim.o.grepprg = 'rg --vimgrep'
-vim.o.shellpipe = ''
 
 local function build_definition_pattern(word)
   return '(function|def|class|local|const|let|var)\\s+' .. word
 end
 
 local function grep_and_open(pattern, dir)
-  vim.cmd { cmd = 'grep', args = { vim.fn.shellescape(pattern), dir }, bang = false }
+  local cmd = vim.o.grepprg .. ' ' .. vim.fn.shellescape(pattern) .. ' ' .. dir
+  vim.fn.setqflist({}, ' ', { title = cmd, lines = vim.fn.systemlist(cmd), efm = vim.o.grepformat })
+  vim.cmd 'copen'
 end
 
 vim.keymap.set('n', 'gD', function()
@@ -125,8 +126,12 @@ vim.api.nvim_create_user_command('Def', function(opts)
   local dir = args[2] or '.'
   grep_and_open(build_definition_pattern(word), dir)
 end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
+
+vim.api.nvim_create_user_command('D', function(opts)
+  vim.cmd('Def ' .. opts.args)
+end, { nargs = '*', desc = 'Alias for :Def' })
+
 vim.api.nvim_create_user_command('Gr', function(opts)
   local pattern = opts.args ~= '' and opts.args or vim.fn.expand '<cword>'
-  vim.cmd('silent grep! ' .. vim.fn.shellescape(pattern))
-  vim.cmd 'copen'
+  grep_and_open(pattern, '.')
 end, { nargs = '?', desc = 'Grep (defaults to word under cursor)' })
