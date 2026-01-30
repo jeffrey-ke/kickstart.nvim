@@ -104,6 +104,7 @@ vim.keymap.set('n', ':', function()
 end, { expr = true, desc = 'Range N: as .,+N instead of +N-1' })
 
 vim.o.grepprg = 'rg --vimgrep'
+vim.o.shellpipe = ''
 
 local function build_definition_pattern(word)
   return '(function|def|class|local|const|let|var)\\s+' .. word
