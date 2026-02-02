@@ -251,6 +251,39 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
+-- Fix terminal viewport desync on focus switch.
+-- When re-entering a terminal via window switch, the viewport can be stale.
+-- Force the terminal process to redraw by sending SIGWINCH (jobresize).
+local terminal_opts_group = vim.api.nvim_create_augroup('terminal-options', { clear = true })
+
+vim.api.nvim_create_autocmd('TermOpen', {
+  group = terminal_opts_group,
+  callback = function()
+    vim.wo.scrolloff = 0
+    vim.wo.sidescrolloff = 0
+    vim.wo.number = false
+    vim.wo.relativenumber = false
+    vim.wo.signcolumn = 'no'
+    vim.wo.list = false
+  end,
+})
+
+vim.api.nvim_create_autocmd('TermEnter', {
+  group = terminal_opts_group,
+  callback = function()
+    vim.wo.scrolloff = 0
+    vim.schedule(function()
+      local chan = vim.bo.channel
+      if chan and chan > 0 then
+        local win = vim.api.nvim_get_current_win()
+        local width = vim.api.nvim_win_get_width(win)
+        local height = vim.api.nvim_win_get_height(win)
+        pcall(vim.fn.jobresize, chan, width, height)
+      end
+    end)
+  end,
+})
+
 -- Auto-reload files when changed externally
 vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI' }, {
   desc = 'Check for file changes when focus is gained or buffer is entered',

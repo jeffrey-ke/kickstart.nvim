@@ -3,7 +3,10 @@ return {
   dependencies = { 'folke/snacks.nvim' },
   config = true,
   opts = {
-    terminal_cmd = '~/.local/bin/claude', -- Point to local installation
+    terminal_cmd = '~/.local/bin/claude',
+    diff_opts = {
+      open_in_current_tab = false,
+    },
   },
   keys = {
     { '<leader>a', nil, desc = 'AI/Claude Code' },
