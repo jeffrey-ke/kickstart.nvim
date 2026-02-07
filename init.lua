@@ -256,6 +256,22 @@ vim.api.nvim_create_autocmd('FileType', {
 -- Force the terminal process to redraw by sending SIGWINCH (jobresize).
 local terminal_opts_group = vim.api.nvim_create_augroup('terminal-options', { clear = true })
 
+local function force_terminal_redraw()
+  vim.schedule(function()
+    local buf = vim.api.nvim_get_current_buf()
+    if vim.bo[buf].buftype ~= 'terminal' then
+      return
+    end
+    local chan = vim.bo[buf].channel
+    if chan and chan > 0 then
+      local win = vim.api.nvim_get_current_win()
+      local width = vim.api.nvim_win_get_width(win)
+      local height = vim.api.nvim_win_get_height(win)
+      pcall(vim.fn.jobresize, chan, width, height)
+    end
+  end)
+end
+
 vim.api.nvim_create_autocmd('TermOpen', {
   group = terminal_opts_group,
   callback = function()
@@ -268,19 +284,13 @@ vim.api.nvim_create_autocmd('TermOpen', {
   end,
 })
 
-vim.api.nvim_create_autocmd('TermEnter', {
+vim.api.nvim_create_autocmd({ 'TermEnter', 'BufWinEnter', 'WinEnter' }, {
   group = terminal_opts_group,
   callback = function()
-    vim.wo.scrolloff = 0
-    vim.schedule(function()
-      local chan = vim.bo.channel
-      if chan and chan > 0 then
-        local win = vim.api.nvim_get_current_win()
-        local width = vim.api.nvim_win_get_width(win)
-        local height = vim.api.nvim_win_get_height(win)
-        pcall(vim.fn.jobresize, chan, width, height)
-      end
-    end)
+    if vim.bo.buftype == 'terminal' then
+      vim.wo.scrolloff = 0
+      force_terminal_redraw()
+    end
   end,
 })
 
