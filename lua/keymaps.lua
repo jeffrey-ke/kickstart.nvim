@@ -135,3 +135,51 @@ vim.api.nvim_create_user_command('Gr', function(opts)
   local pattern = opts.args ~= '' and opts.args or vim.fn.expand '<cword>'
   grep_and_open(pattern, '.')
 end, { nargs = '?', desc = 'Grep (defaults to word under cursor)' })
+
+vim.api.nvim_create_user_command('Su', function(opts)
+  local args = vim.split(opts.args, '%s+')
+  local from, to
+
+  if #args == 1 and args[1] ~= '' then
+    from = vim.fn.expand '<cword>'
+    to = args[1]
+  elseif #args >= 2 then
+    from = args[1]
+    to = args[2]
+  else
+    vim.notify('Usage: :Su <replacement> or :Su <from> <replacement>', vim.log.levels.ERROR)
+    return
+  end
+
+  local qflist = vim.fn.getqflist()
+  if #qflist == 0 then
+    vim.notify('Quickfix list is empty', vim.log.levels.WARN)
+    return
+  end
+
+  local files = {}
+  for _, entry in ipairs(qflist) do
+    if entry.bufnr and entry.bufnr > 0 then
+      local fname = vim.api.nvim_buf_get_name(entry.bufnr)
+      if fname ~= '' then
+        files[fname] = true
+      end
+    end
+  end
+
+  local file_count = vim.tbl_count(files)
+  if file_count == 0 then
+    vim.notify('No files in quickfix list', vim.log.levels.WARN)
+    return
+  end
+
+  local escaped_from = vim.fn.escape(from, '/\\')
+  local escaped_to = vim.fn.escape(to, '/\\&~')
+  for fname, _ in pairs(files) do
+    vim.cmd('silent! argadd ' .. vim.fn.fnameescape(fname))
+  end
+  vim.cmd('silent! argdo %s/\\<' .. escaped_from .. '\\>/' .. escaped_to .. '/ge | update')
+  vim.cmd 'argdelete *'
+
+  vim.notify(string.format('Substituted "%s" -> "%s" in %d file(s)', from, to, file_count), vim.log.levels.INFO)
+end, { nargs = '+', desc = 'Substitute in quickfix files: :Su <to> or :Su <from> <to>' })
