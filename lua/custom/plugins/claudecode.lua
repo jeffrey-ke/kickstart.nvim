@@ -3,7 +3,7 @@ return {
   dependencies = { 'folke/snacks.nvim' },
   config = true,
   opts = {
-    terminal_cmd = '~/.local/bin/claude',
+    terminal_cmd = '/Users/jke/.claude/local/claude',
     diff_opts = {
       open_in_current_tab = false,
     },
