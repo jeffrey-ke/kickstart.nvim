@@ -91,17 +91,16 @@ vim.keymap.set('n', '<leader>qd', function()
 end, { desc = 'Stop session recording' })
 
 -- Maps [count]_: to populate a backward range ending at the current line
-vim.keymap.set('n', '-:', [[:<C-U>.-<C-R>=v:count1<CR>,.]], {
-  desc = 'Populate backward range based on count',
+vim.keymap.set('n', '-:', [[:<C-U>.-<C-R>=v:count1<CR>,.s/]], {
+  desc = 'Populate backward range with substitute',
 })
 -- Remap [count]: to use .,.+N instead of .,.+N-1
 vim.keymap.set('n', ':', function()
   if vim.v.count > 0 then
-    -- The <C-U> clears the default range Vim tried to insert
-    return ':<C-U>.,.+' .. vim.v.count
+    return ':<C-U>.,.+' .. vim.v.count .. 's/'
   end
   return ':'
-end, { expr = true, desc = 'Range N: as .,+N instead of +N-1' })
+end, { expr = true, desc = 'Range N: as .,+N substitute' })
 
 vim.o.grepprg = 'rg --vimgrep'
 
