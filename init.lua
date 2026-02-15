@@ -251,7 +251,6 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
-
 -- Auto-reload files when changed externally
 vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI' }, {
   desc = 'Check for file changes when focus is gained or buffer is entered',
@@ -380,7 +379,6 @@ require('lazy').setup({
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
   'tpope/vim-fugitive',
   'tpope/vim-eunuch',
-  'tpope/vim-surround',
   { 'ellisonleao/gruvbox.nvim', priority = 1000, config = true, opts = ... },
 
   {
