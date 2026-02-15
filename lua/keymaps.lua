@@ -112,6 +112,7 @@ local function grep_and_open(pattern, dir)
   local cmd = vim.o.grepprg .. ' ' .. vim.fn.shellescape(pattern) .. ' ' .. dir
   vim.fn.setqflist({}, ' ', { title = cmd, lines = vim.fn.systemlist(cmd), efm = vim.o.grepformat })
   vim.cmd 'copen'
+  pcall(vim.cmd, 'cfirst')
 end
 
 vim.keymap.set('n', 'gD', function()
