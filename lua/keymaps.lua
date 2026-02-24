@@ -125,6 +125,7 @@ vim.api.nvim_create_user_command('Def', function(opts)
   local word = args[1] ~= '' and args[1] or vim.fn.expand '<cword>'
   local dir = args[2] or '.'
   grep_and_open(build_definition_pattern(word), dir)
+  vim.cmd 'cclose'
 end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
 
 vim.api.nvim_create_user_command('D', function(opts)
