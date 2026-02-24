@@ -131,6 +131,24 @@ vim.api.nvim_create_user_command('D', function(opts)
   vim.cmd('Def ' .. opts.args)
 end, { nargs = '*', desc = 'Alias for :Def' })
 
+vim.api.nvim_create_user_command('VDef', function(opts)
+  vim.cmd 'vsplit'
+  vim.cmd('Def ' .. opts.args)
+end, { nargs = '*', desc = 'Vsplit + :Def' })
+
+vim.api.nvim_create_user_command('Vd', function(opts)
+  vim.cmd('VDef ' .. opts.args)
+end, { nargs = '*', desc = 'Alias for :VDef' })
+
+vim.api.nvim_create_user_command('VGr', function(opts)
+  vim.cmd 'vsplit'
+  vim.cmd('Gr ' .. opts.args)
+end, { nargs = '?', desc = 'Vsplit + :Gr' })
+
+vim.api.nvim_create_user_command('Vg', function(opts)
+  vim.cmd('VGr ' .. opts.args)
+end, { nargs = '?', desc = 'Alias for :VGr' })
+
 vim.api.nvim_create_user_command('Gr', function(opts)
   local pattern = opts.args ~= '' and opts.args or vim.fn.expand '<cword>'
   grep_and_open(pattern, '.')
