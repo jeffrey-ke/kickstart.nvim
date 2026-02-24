@@ -101,7 +101,7 @@ vim.cmd.packadd 'cfilter'
 vim.o.termguicolors = true
 
 -- [[ Wildmenu Configuration ]]
-vim.o.wildmode = 'longest:full,full' -- Complete longest common string, then show full matches
+vim.o.wildmode = 'full' -- Tab immediately selects and cycles through matches
 vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
 vim.o.wildignorecase = true -- Case-insensitive command-line completion
 
