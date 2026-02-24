@@ -1118,11 +1118,6 @@ require('lazy').setup({
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
       vim.cmd.colorscheme 'tokyonight-night'
 
-      -- Configure window separators to be more opaque (white)
-      -- WinSeparator controls vertical splits (modern, Neovim 0.7+)
-      vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', bg = 'NONE' })
-      -- VertSplit for backward compatibility (pre-Neovim 0.7)
-      vim.api.nvim_set_hl(0, 'VertSplit', { fg = '#ffffff', bg = 'NONE' })
     end,
   },
 
@@ -1252,5 +1247,9 @@ require('lazy').setup({
   },
 })
 vim.cmd [[colorscheme gruvbox]]
+
+-- Dim inactive windows
+vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#16171e' })
+
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
