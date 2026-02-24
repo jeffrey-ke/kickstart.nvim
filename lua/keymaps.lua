@@ -173,12 +173,12 @@ vim.api.nvim_create_user_command('Su', function(opts)
     return
   end
 
-  local escaped_from = vim.fn.escape(from, '/\\')
+  local sub_from = vim.fn.escape(from, '/')
   local escaped_to = vim.fn.escape(to, '/\\&~')
   for fname, _ in pairs(files) do
     vim.cmd('silent! argadd ' .. vim.fn.fnameescape(fname))
   end
-  vim.cmd('silent! argdo %s/\\<' .. escaped_from .. '\\>/' .. escaped_to .. '/ge | update')
+  vim.cmd('silent! argdo %s/' .. sub_from .. '/' .. escaped_to .. '/ge | update')
   vim.cmd 'argdelete *'
 
   vim.notify(string.format('Substituted "%s" -> "%s" in %d file(s)', from, to, file_count), vim.log.levels.INFO)
