@@ -98,7 +98,7 @@ vim.cmd.packadd 'cfilter'
 
 -- [[ Setting options ]]
 -- Enable 24-bit RGB colors in the terminal
-vim.o.termguicolors = true
+vim.o.termguicolors = false
 
 -- [[ Wildmenu Configuration ]]
 vim.o.wildmode = 'full' -- Tab immediately selects and cycles through matches
@@ -1117,7 +1117,6 @@ require('lazy').setup({
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
       vim.cmd.colorscheme 'tokyonight-night'
-
     end,
   },
 
@@ -1246,10 +1245,25 @@ require('lazy').setup({
     },
   },
 })
-vim.cmd [[colorscheme gruvbox]]
+vim.cmd [[colorscheme vim]]
+vim.cmd [[set notgc]]
+
+-- Make snacks.nvim terminals transparent (Claude Code terminal)
+vim.api.nvim_set_hl(0, 'SnacksNormal', { bg = 'NONE' })
+vim.api.nvim_set_hl(0, 'SnacksNormalNC', { bg = 'NONE' })
+
+-- Subdued which-key popup
+vim.api.nvim_set_hl(0, 'WhichKeyNormal', { bg = '#1a1b26' })
+vim.api.nvim_set_hl(0, 'WhichKeyBorder', { fg = '#3b4261', bg = '#1a1b26' })
+vim.api.nvim_set_hl(0, 'WhichKeyTitle', { fg = '#7aa2f7', bg = '#1a1b26' })
 
 -- Dim inactive windows
-vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#16171e' })
+vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = 236 })
+
+-- Subdued wildmenu/completion popup
+vim.api.nvim_set_hl(0, 'WildMenu', { ctermbg = 238, ctermfg = 7, bold = true })
+vim.api.nvim_set_hl(0, 'Pmenu', { ctermbg = 236, ctermfg = 7 })
+vim.api.nvim_set_hl(0, 'PmenuSel', { ctermbg = 238, ctermfg = 15, bold = true })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
