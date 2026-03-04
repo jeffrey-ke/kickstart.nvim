@@ -109,6 +109,32 @@ vim.o.wildignorecase = true -- Case-insensitive command-line completion
 -- NOTE: You can change these options as you wish!
 --  For more options, you can see `:help option-list`
 
+-- Native tabline showing all listed buffers
+vim.api.nvim_create_autocmd('ColorScheme', {
+  callback = function()
+    vim.api.nvim_set_hl(0, 'TabLineSel', { fg = '#000000', bg = '#98e6c8', ctermfg = 0, ctermbg = 121, bold = true })
+    vim.api.nvim_set_hl(0, 'TabLineModified', { ctermfg = 203, bold = true })
+  end,
+})
+vim.o.showtabline = 2
+function _G.custom_tabline()
+  local bufs = {}
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[buf].buflisted then
+      local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':t')
+      if name == '' then
+        name = '[No Name]'
+      end
+      local modified = vim.bo[buf].modified and '%#TabLineModified# [+]' or ''
+      local is_current = buf == vim.api.nvim_get_current_buf()
+      local hl = is_current and '%#TabLineSel#' or '%#TabLine#'
+      table.insert(bufs, hl .. ' ' .. name .. modified .. ' ')
+    end
+  end
+  return table.concat(bufs) .. '%#TabLineFill#'
+end
+vim.o.tabline = '%!v:lua.custom_tabline()'
+
 -- Make line numbers default
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
@@ -871,6 +897,8 @@ require('lazy').setup({
         ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
         automatic_installation = false,
         handlers = {
+          -- Disable pyright LSP (keep :make/:Make for on-demand checks)
+          pyright = function() end,
           function(server_name)
             local server = servers[server_name] or {}
             -- This handles overriding only values explicitly passed
@@ -1256,6 +1284,14 @@ vim.api.nvim_set_hl(0, 'SnacksNormalNC', { bg = 'NONE' })
 vim.api.nvim_set_hl(0, 'WhichKeyNormal', { bg = '#1a1b26' })
 vim.api.nvim_set_hl(0, 'WhichKeyBorder', { fg = '#3b4261', bg = '#1a1b26' })
 vim.api.nvim_set_hl(0, 'WhichKeyTitle', { fg = '#7aa2f7', bg = '#1a1b26' })
+
+-- Python: make comments more readable against the vim colorscheme
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'python',
+  callback = function()
+    vim.api.nvim_set_hl(0, 'Comment', { ctermfg = 103, italic = false })
+  end,
+})
 
 -- Dim inactive windows
 vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = 236 })
