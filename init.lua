@@ -1294,7 +1294,7 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 
 -- Dim inactive windows
-vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = 236 })
+vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = 17 })
 
 -- Subdued wildmenu/completion popup
 vim.api.nvim_set_hl(0, 'WildMenu', { ctermbg = 238, ctermfg = 7, bold = true })
