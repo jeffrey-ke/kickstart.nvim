@@ -104,6 +104,18 @@ vim.keymap.set('n', ':', function()
   return ':'
 end, { expr = true, desc = 'Range N: as .,+N substitute' })
 
+vim.keymap.set('n', '<leader>rn', function()
+  local word = vim.fn.expand '<cword>'
+  local save_pos = vim.api.nvim_win_get_cursor(0)
+  vim.cmd 'normal ]M'
+  local end_line = vim.api.nvim_win_get_cursor(0)[1]
+  vim.api.nvim_win_set_cursor(0, save_pos)
+  local escaped = vim.fn.escape(word, '/')
+  local offset = end_line - save_pos[1]
+  local cmd = '.,+' .. offset .. 's/' .. escaped .. '/'
+  vim.api.nvim_feedkeys(':' .. cmd, 'n', false)
+end, { desc = '[R]e[n]ame word to end of method' })
+
 vim.o.grepprg = 'rg --vimgrep'
 
 local function build_definition_pattern(word)
