@@ -898,8 +898,6 @@ require('lazy').setup({
         ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
         automatic_installation = false,
         handlers = {
-          -- Disable pyright LSP (keep :make/:Make for on-demand checks)
-          pyright = function() end,
           function(server_name)
             local server = servers[server_name] or {}
             -- This handles overriding only values explicitly passed
@@ -1190,9 +1188,9 @@ require('lazy').setup({
       local original_active = statusline.active
       ---@diagnostic disable-next-line: duplicate-set-field
       statusline.active = function()
-        local pwd = vim.fn.getcwd()
-        local pwd_section = '%#StatusLinePwd# ' .. pwd .. ' %*'
-        return pwd_section .. original_active()
+        local pwd = vim.fn.getcwd():gsub('^' .. vim.env.HOME, '~')
+        local pwd_section = ' %#StatusLinePwd#' .. pwd .. '%* '
+        return original_active() .. pwd_section
       end
 
       -- Override StatusLineNC after mini.statusline setup to make horizontal separators white
