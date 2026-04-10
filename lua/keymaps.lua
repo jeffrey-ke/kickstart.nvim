@@ -29,6 +29,44 @@ vim.keymap.set('n', '<leader>td', toggle_diagnostics, { desc = '[T]oggle [D]iagn
 vim.keymap.set({ 'n', 'o', 'v' }, '^', '$')
 vim.keymap.set({ 'n', 'o', 'v' }, '$', '^')
 
+-- Fold keymaps
+local function_types = { 'function_definition', 'function_declaration', 'method_definition', 'method_declaration', 'arrow_function', 'function' }
+
+local function enclosing_function_node()
+  local node = vim.treesitter.get_node()
+  while node do
+    for _, t in ipairs(function_types) do
+      if node:type() == t then
+        return node
+      end
+    end
+    node = node:parent()
+  end
+end
+
+local function jump_to_node_start(node)
+  local row = node:start()
+  vim.api.nvim_win_set_cursor(0, { row + 1, 0 })
+end
+
+vim.keymap.set('n', 'zf', function()
+  local node = enclosing_function_node()
+  if node then
+    jump_to_node_start(node)
+  end
+  vim.cmd 'normal! za'
+end, { desc = 'Toggle enclosing function fold' })
+
+vim.keymap.set('n', 'zF', function()
+  local node = enclosing_function_node()
+  if node then
+    jump_to_node_start(node)
+  end
+  vim.cmd 'normal! zMzO'
+end, { desc = 'Focus enclosing function (fold all others)' })
+vim.keymap.set('n', '<Tab>', 'za', { desc = 'Toggle fold under cursor' })
+vim.keymap.set('n', '<S-Tab>', 'zA', { desc = 'Toggle fold under cursor (recursive)' })
+
 -- Select pasted text
 vim.keymap.set('n', '<leader>p', '`[v`]', { desc = 'Select [P]asted text' })
 
@@ -66,6 +104,27 @@ vim.keymap.set('n', '<leader>k', '<C-w><C-k>', { desc = 'Move focus to the upper
 --
 
 vim.keymap.set('n', '<leader>ti', '$a#type: ignore<Esc>', { desc = 'Insert #type: ignore on the line' })
+
+vim.keymap.set('n', '<leader>lr', function()
+  local file = vim.fn.expand '%:.'
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local ref = '@' .. file .. '#L' .. line
+  vim.fn.setreg('+', ref)
+  vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
+end, { desc = 'Yank Claude Code file reference (@file#Lnum)' })
+
+vim.keymap.set('v', '<leader>lr', function()
+  local file = vim.fn.expand '%:.'
+  local start_line = vim.fn.line 'v'
+  local end_line = vim.fn.line '.'
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  local ref = '@' .. file .. '#L' .. start_line .. '-' .. end_line
+  vim.fn.setreg('+', ref)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+  vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
+end, { desc = 'Yank Claude Code file range reference (@file#Lstart-end)' })
 
 vim.keymap.set('n', 'g;', 'g;zz')
 
@@ -123,7 +182,10 @@ local function build_definition_pattern(word)
 end
 
 local function grep_and_open(pattern, dir)
-  local cmd = vim.o.grepprg .. ' ' .. vim.fn.shellescape(pattern) .. ' ' .. dir
+  local cmd = vim.o.grepprg .. ' -g "!*.md" -g "!*.txt" -g "!*.json" -g "!*.yaml" -g "!*.yml" -g "!*.toml" -g "!*.lock" -g "!*.csv" '
+    .. vim.fn.shellescape(pattern)
+    .. ' '
+    .. dir
   vim.fn.setqflist({}, ' ', { title = cmd, lines = vim.fn.systemlist(cmd), efm = vim.o.grepformat })
   vim.cmd 'copen'
   pcall(vim.cmd, 'cfirst')
@@ -154,6 +216,15 @@ end, { nargs = '*', desc = 'Vsplit + :Def' })
 vim.api.nvim_create_user_command('Vd', function(opts)
   vim.cmd('VDef ' .. opts.args)
 end, { nargs = '*', desc = 'Alias for :VDef' })
+
+vim.api.nvim_create_user_command('SDef', function(opts)
+  vim.cmd 'split'
+  vim.cmd('Def ' .. opts.args)
+end, { nargs = '*', desc = 'Hsplit + :Def' })
+
+vim.api.nvim_create_user_command('Sd', function(opts)
+  vim.cmd('SDef ' .. opts.args)
+end, { nargs = '*', desc = 'Alias for :SDef' })
 
 vim.api.nvim_create_user_command('VGr', function(opts)
   vim.cmd 'vsplit'
