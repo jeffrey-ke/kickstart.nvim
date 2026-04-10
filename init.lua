@@ -243,8 +243,9 @@ vim.opt.laststatus = 2
 -- See `:help 'confirm'`
 vim.o.confirm = true
 
--- Folding configuration
-vim.opt.foldmethod = 'indent'
+-- Folding configuration (treesitter-aware)
+vim.opt.foldmethod = 'expr'
+vim.opt.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
 vim.opt.foldlevelstart = 99
 
 -- Automatically reload files changed outside of nvim
