@@ -101,7 +101,7 @@ vim.cmd.packadd 'cfilter'
 vim.o.termguicolors = false
 
 -- [[ Wildmenu Configuration ]]
-vim.o.wildmode = 'full' -- Tab immediately selects and cycles through matches
+vim.o.wildmode = 'longest:full' -- Tab completes to longest common prefix and shows menu; next Tab cycles
 vim.o.wildoptions = 'pum' -- Show completions in a popup menu (modern Neovim feature)
 vim.o.wildignorecase = true -- Case-insensitive command-line completion
 
@@ -1116,11 +1116,7 @@ require('lazy').setup({
       signature = { enabled = true },
 
       cmdline = {
-        enabled = true,
-        keymap = {
-          ['<C-j>'] = { 'select_next', 'fallback' },
-          ['<C-k>'] = { 'select_prev', 'fallback' },
-        },
+        enabled = false, -- Use native wildmenu instead (see wildmode above)
       },
     },
   },
