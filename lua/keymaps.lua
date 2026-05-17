@@ -287,3 +287,5 @@ vim.api.nvim_create_user_command('Su', function(opts)
 
   vim.notify(string.format('Substituted "%s" -> "%s" in %d file(s)', from, to, file_count), vim.log.levels.INFO)
 end, { nargs = '+', desc = 'Substitute in quickfix files: :Su <to> or :Su <from> <to>' })
+
+require('custom.stage_commit').setup()
