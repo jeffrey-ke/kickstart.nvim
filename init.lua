@@ -1288,6 +1288,40 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
+-- Highlight backtick-delimited prose (design notes, drafts) so it pops.
+-- Single-line: `prose here`   Multi-line block: ```...```
+-- Priority 200 beats treesitter (100).
+local function set_draft_prose_hl()
+  -- Background-only, like CursorLine. Keep the normal foreground.
+  -- ctermbg for terminals without termguicolors; bg (=guibg) for gui/true-color.
+  -- Bright yellow bg; force fg to black so text stays readable.
+  vim.api.nvim_set_hl(0, 'DraftProse', {
+    bg = '#ffff00', ctermbg = 226,
+    fg = '#000000', ctermfg = 0,
+    bold = true,
+  })
+end
+set_draft_prose_hl()
+vim.api.nvim_create_autocmd('ColorScheme', {
+  group = vim.api.nvim_create_augroup('draft-prose-hl', { clear = true }),
+  callback = set_draft_prose_hl,
+})
+local function apply_draft_match()
+  for _, m in ipairs(vim.fn.getmatches()) do
+    if m.group == 'DraftProse' then return end  -- already applied
+  end
+  vim.fn.matchadd('DraftProse', [[`[^`]*`]], 200)  -- closed: `prose`
+  vim.fn.matchadd('DraftProse', [[`[^`]*$]], 200)  -- to EOL: `prose
+end
+vim.api.nvim_create_autocmd({ 'BufWinEnter', 'WinNew' }, {
+  group = vim.api.nvim_create_augroup('draft-prose-match', { clear = true }),
+  callback = apply_draft_match,
+})
+-- Apply to windows already open when this config loads.
+for _, win in ipairs(vim.api.nvim_list_wins()) do
+  vim.api.nvim_win_call(win, apply_draft_match)
+end
+
 -- Dim inactive windows
 vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = 17 })
 
