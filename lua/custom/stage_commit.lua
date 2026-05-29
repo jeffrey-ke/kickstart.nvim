@@ -129,10 +129,6 @@ local function on_write()
   M.popup.msg_tempfile = tempfile
 
   local args = { 'commit', '-F', tempfile }
-  if M.popup.restrict_path and M.popup.restrict_path ~= '' then
-    table.insert(args, '--')
-    table.insert(args, M.popup.restrict_path)
-  end
   local code, _, err = run_git(args, M.popup.cwd)
   if code == 0 then
     vim.bo[buf].modified = false
