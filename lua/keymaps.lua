@@ -64,7 +64,7 @@ vim.keymap.set('n', 'zF', function()
   end
   vim.cmd 'normal! zMzO'
 end, { desc = 'Focus enclosing function (fold all others)' })
-vim.keymap.set('n', '<Tab>', 'za', { desc = 'Toggle fold under cursor' })
+-- vim.keymap.set('n', '<Tab>', 'za', { desc = 'Toggle fold under cursor' }) -- conflicts with <C-i> jumplist
 vim.keymap.set('n', '<S-Tab>', 'zA', { desc = 'Toggle fold under cursor (recursive)' })
 
 -- Select pasted text
@@ -105,7 +105,7 @@ vim.keymap.set('n', '<leader>k', '<C-w><C-k>', { desc = 'Move focus to the upper
 
 vim.keymap.set('n', '<leader>ti', '$a#type: ignore<Esc>', { desc = 'Insert #type: ignore on the line' })
 
-vim.keymap.set('n', '<leader>lr', function()
+vim.keymap.set('n', '<leader>yr', function()
   local file = vim.fn.expand '%:.'
   local line = vim.api.nvim_win_get_cursor(0)[1]
   local ref = '@' .. file .. '#L' .. line
@@ -113,7 +113,7 @@ vim.keymap.set('n', '<leader>lr', function()
   vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
 end, { desc = 'Yank Claude Code file reference (@file#Lnum)' })
 
-vim.keymap.set('v', '<leader>lr', function()
+vim.keymap.set('v', '<leader>yr', function()
   local file = vim.fn.expand '%:.'
   local start_line = vim.fn.line 'v'
   local end_line = vim.fn.line '.'
