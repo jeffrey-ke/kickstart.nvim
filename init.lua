@@ -98,7 +98,7 @@ vim.cmd.packadd 'cfilter'
 
 -- [[ Setting options ]]
 -- Enable 24-bit RGB colors in the terminal
-vim.o.termguicolors = false
+vim.o.termguicolors = true
 
 -- [[ Wildmenu Configuration ]]
 vim.o.wildmode = 'longest:full' -- Tab completes to longest common prefix and shows menu; next Tab cycles
@@ -113,7 +113,12 @@ vim.o.wildignorecase = true -- Case-insensitive command-line completion
 vim.api.nvim_create_autocmd('ColorScheme', {
   callback = function()
     vim.api.nvim_set_hl(0, 'TabLineSel', { fg = '#000000', bg = '#98e6c8', ctermfg = 0, ctermbg = 121, bold = true })
-    vim.api.nvim_set_hl(0, 'TabLineModified', { ctermfg = 203, bold = true })
+    vim.api.nvim_set_hl(0, 'TabLineModified', { fg = '#f7768e', ctermfg = 203, bold = true })
+    vim.cmd 'hi StatusLineFile guifg=#c0caf5 guibg=NONE ctermfg=189 ctermbg=NONE cterm=NONE'
+    vim.cmd 'hi StatusLineGit  guifg=#9ece6a guibg=NONE ctermfg=114 ctermbg=NONE cterm=NONE'
+    vim.cmd 'hi StatusLineLoc  guifg=#e0af68 guibg=NONE ctermfg=179 ctermbg=NONE cterm=NONE'
+    vim.cmd 'hi StatusLinePwd  guifg=#7dcfff guibg=NONE gui=bold ctermfg=117 ctermbg=NONE cterm=bold'
+    vim.cmd 'hi StatusLineNC   guifg=#3b4261 guibg=#3b4261 ctermfg=7 ctermbg=7'
   end,
 })
 vim.o.showtabline = 2
@@ -236,7 +241,7 @@ vim.o.cursorline = true
 vim.o.scrolloff = 2
 
 -- Always show status line for all windows (acts as horizontal separator)
-vim.opt.laststatus = 2
+vim.opt.laststatus = 3
 
 -- if performing an operation that would fail due to unsaved changes in the buffer (like `:q`),
 -- instead raise a dialog asking if you wish to save the current file(s)
@@ -1139,7 +1144,7 @@ require('lazy').setup({
       -- Load the colorscheme here.
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-      vim.cmd.colorscheme 'tokyonight-night'
+      vim.cmd.colorscheme 'tokyonight-storm'
     end,
   },
 
@@ -1171,26 +1176,23 @@ require('lazy').setup({
       -- set use_icons to true if you have a Nerd Font
       statusline.setup { use_icons = vim.g.have_nerd_font }
 
-      -- You can configure sections in the statusline by overriding their
-      -- default behavior. For example, here we set the section for
-      -- cursor location to LINE:COLUMN
-      ---@diagnostic disable-next-line: duplicate-set-field
-      statusline.section_location = function()
-        return '%2l:%-2v'
-      end
-
-      -- Add PWD to statusline with bold colored font
-      vim.api.nvim_set_hl(0, 'StatusLinePwd', { fg = '#7dcfff', bold = true })
-      local original_active = statusline.active
-      ---@diagnostic disable-next-line: duplicate-set-field
+---@diagnostic disable-next-line: duplicate-set-field
       statusline.active = function()
+        local mode, mode_hl = statusline.section_mode { trunc_width = 120 }
+        local git = statusline.section_git { trunc_width = 75 }
+        local diagnostics = statusline.section_diagnostics { trunc_width = 75 }
+        local path = vim.fn.expand '%:.'
+        if path == '' then path = '[No Name]' end
+        local filename = path .. (vim.bo.modified and '[+]' or '') .. (vim.bo.readonly and '[RO]' or '')
         local pwd = vim.fn.getcwd():gsub('^' .. vim.env.HOME, '~')
-        local pwd_section = ' %#StatusLinePwd#' .. pwd .. '%* '
-        return original_active() .. pwd_section
-      end
 
-      -- Override StatusLineNC after mini.statusline setup to make horizontal separators white
-      vim.api.nvim_set_hl(0, 'StatusLineNC', { fg = '#ffffff', bg = '#ffffff' })
+        local s = '%#' .. mode_hl .. '# ' .. mode .. ' '
+        if git ~= '' then s = s .. '%#StatusLineGit# ' .. git .. ' ' end
+        if diagnostics ~= '' then s = s .. '%#StatusLineGit# ' .. diagnostics .. ' ' end
+        s = s .. '%<%#StatusLinePwd# ' .. pwd .. ' '
+        s = s .. '%=%#StatusLineLoc# %2l:%-2v %#StatusLineFile# ' .. filename .. ' '
+        return s
+      end
 
       -- ... and there is more!
       --  Check out: https://github.com/echasnovski/mini.nvim
@@ -1268,8 +1270,8 @@ require('lazy').setup({
     },
   },
 })
-vim.cmd [[colorscheme vim]]
-vim.cmd [[set notgc]]
+-- Cursorline: storm blue_visual so the current line reads clearly against bg=#24283b
+vim.api.nvim_set_hl(0, 'CursorLine', { bg = '#2e3c64' })
 
 -- Make snacks.nvim terminals transparent (Claude Code terminal)
 vim.api.nvim_set_hl(0, 'SnacksNormal', { bg = 'NONE' })
@@ -1284,7 +1286,7 @@ vim.api.nvim_set_hl(0, 'WhichKeyTitle', { fg = '#7aa2f7', bg = '#1a1b26' })
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'python',
   callback = function()
-    vim.api.nvim_set_hl(0, 'Comment', { ctermfg = 103, italic = false })
+    vim.api.nvim_set_hl(0, 'Comment', { fg = '#565f89', ctermfg = 103, italic = false })
   end,
 })
 
@@ -1323,12 +1325,57 @@ for _, win in ipairs(vim.api.nvim_list_wins()) do
 end
 
 -- Dim inactive windows
-vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = 17 })
+vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#1f2335', ctermbg = 17 })
+vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', ctermfg = 15 })
+
+-- Flash the split separators red while a <leader> sequence is pending.
+-- There is no native "leader pressed" event (<leader> is a prefix), so we watch
+-- keystrokes with vim.on_key: arm on <leader> in normal/visual mode, then restore
+-- when the next key resolves the mapping or after 'timeoutlen' elapses.
+do
+  local function set_normal()
+    vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', ctermfg = 15 })
+  end
+  local function set_active()
+    vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#f7768e', ctermfg = 203 })
+  end
+  local leader = vim.api.nvim_replace_termcodes('<leader>', true, true, true)
+  local uv = vim.uv or vim.loop
+  local timer = uv.new_timer()
+  local active = false
+
+  local function restore()
+    if not active then
+      return
+    end
+    active = false
+    vim.schedule(set_normal)
+  end
+
+  vim.on_key(function(_, typed)
+    if typed == '' then
+      return
+    end
+    local mode = vim.api.nvim_get_mode().mode
+    local leaderish = mode == 'n' or mode == 'v' or mode == 'V' or mode == '\22'
+
+    if typed == leader and leaderish then
+      active = true
+      vim.schedule(set_active)
+      timer:stop()
+      timer:start(vim.o.timeoutlen, 0, restore)
+    elseif active then
+      -- a follow-up key resolved (or aborted) the leader mapping
+      timer:stop()
+      restore()
+    end
+  end, vim.api.nvim_create_namespace 'leader-winsep-flash')
+end
 
 -- Subdued wildmenu/completion popup
-vim.api.nvim_set_hl(0, 'WildMenu', { ctermbg = 238, ctermfg = 7, bold = true })
-vim.api.nvim_set_hl(0, 'Pmenu', { ctermbg = 236, ctermfg = 7 })
-vim.api.nvim_set_hl(0, 'PmenuSel', { ctermbg = 238, ctermfg = 15, bold = true })
+vim.api.nvim_set_hl(0, 'WildMenu', { bg = '#292e42', fg = '#c0caf5', ctermbg = 238, ctermfg = 7, bold = true })
+vim.api.nvim_set_hl(0, 'Pmenu', { bg = '#1f2335', fg = '#c0caf5', ctermbg = 236, ctermfg = 7 })
+vim.api.nvim_set_hl(0, 'PmenuSel', { bg = '#292e42', fg = '#c0caf5', ctermbg = 238, ctermfg = 15, bold = true })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
