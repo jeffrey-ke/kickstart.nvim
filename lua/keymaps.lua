@@ -126,6 +126,16 @@ vim.keymap.set('v', '<leader>yr', function()
   vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
 end, { desc = 'Yank Claude Code file range reference (@file#Lstart-end)' })
 
+vim.keymap.set('n', '<leader>yp', function()
+  local path = vim.fn.expand '%:p'
+  if path == '' then
+    vim.notify('No file for this buffer', vim.log.levels.WARN)
+    return
+  end
+  vim.fn.setreg('+', path)
+  vim.notify('Copied: ' .. path, vim.log.levels.INFO)
+end, { desc = 'Yank absolute [P]ath of current file' })
+
 vim.keymap.set('n', 'g;', 'g;zz')
 
 -- Command abbreviations
