@@ -589,7 +589,11 @@ require('lazy').setup({
             },
           },
         },
-        -- pickers = {}
+        pickers = {
+          find_files = {
+            hidden = true
+          }
+        },
         extensions = {
           ['ui-select'] = {
             require('telescope.themes').get_dropdown(),
@@ -1308,7 +1312,18 @@ vim.api.nvim_create_autocmd('ColorScheme', {
   group = vim.api.nvim_create_augroup('draft-prose-hl', { clear = true }),
   callback = set_draft_prose_hl,
 })
+vim.g.draft_prose_enabled = false
+
+local function clear_draft_match()
+  for _, m in ipairs(vim.fn.getmatches()) do
+    if m.group == 'DraftProse' then
+      vim.fn.matchdelete(m.id)
+    end
+  end
+end
+
 local function apply_draft_match()
+  if not vim.g.draft_prose_enabled then return end
   for _, m in ipairs(vim.fn.getmatches()) do
     if m.group == 'DraftProse' then return end  -- already applied
   end
@@ -1323,6 +1338,18 @@ vim.api.nvim_create_autocmd({ 'BufWinEnter', 'WinNew' }, {
 for _, win in ipairs(vim.api.nvim_list_wins()) do
   vim.api.nvim_win_call(win, apply_draft_match)
 end
+
+-- Toggle backtick prose highlighting across every window.
+local function toggle_draft_prose()
+  vim.g.draft_prose_enabled = not vim.g.draft_prose_enabled
+  local fn = vim.g.draft_prose_enabled and apply_draft_match or clear_draft_match
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    vim.api.nvim_win_call(win, fn)
+  end
+  vim.notify('Backtick prose highlight ' .. (vim.g.draft_prose_enabled and 'on' or 'off'), vim.log.levels.INFO)
+end
+vim.api.nvim_create_user_command('ToggleProse', toggle_draft_prose, { desc = 'Toggle backtick prose highlighting' })
+vim.keymap.set('n', '<leader>tp', toggle_draft_prose, { desc = '[T]oggle backtick [P]rose highlight' })
 
 -- Dim inactive windows
 vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#1f2335', ctermbg = 17 })
@@ -1376,6 +1403,12 @@ end
 vim.api.nvim_set_hl(0, 'WildMenu', { bg = '#292e42', fg = '#c0caf5', ctermbg = 238, ctermfg = 7, bold = true })
 vim.api.nvim_set_hl(0, 'Pmenu', { bg = '#1f2335', fg = '#c0caf5', ctermbg = 236, ctermfg = 7 })
 vim.api.nvim_set_hl(0, 'PmenuSel', { bg = '#292e42', fg = '#c0caf5', ctermbg = 238, ctermfg = 15, bold = true })
+
+-- High-contrast diffs (fugitive, :diffthis, etc.): green/red/yellow with black text
+vim.api.nvim_set_hl(0, 'DiffAdd', { bg = '#9ece6a', fg = '#000000', ctermbg = 150, ctermfg = 0 })
+vim.api.nvim_set_hl(0, 'DiffDelete', { bg = '#f7768e', fg = '#000000', ctermbg = 203, ctermfg = 0 })
+vim.api.nvim_set_hl(0, 'DiffChange', { bg = '#e0af68', fg = '#000000', ctermbg = 179, ctermfg = 0 })
+vim.api.nvim_set_hl(0, 'DiffText', { bg = '#e7c547', fg = '#000000', ctermbg = 185, ctermfg = 0, bold = true })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
