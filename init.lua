@@ -252,6 +252,60 @@ vim.o.confirm = true
 vim.opt.foldmethod = 'expr'
 vim.opt.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
 vim.opt.foldlevelstart = 99
+-- Keep syntax-highlighted (colored) text in the fold line instead of uniform grey.
+-- Applies to all folds; the grey Folded background fill is preserved by the fillchars.
+-- NOTE: this nvim build lacks the builtin vim.treesitter.foldtext, so we roll our own:
+-- emit the fold's first line as treesitter-highlighted {text, group} chunks.
+function _G.custom_foldtext()
+  local fs = vim.v.foldstart
+  local bufnr = vim.api.nvim_get_current_buf()
+  local line = vim.api.nvim_buf_get_lines(bufnr, fs - 1, fs, false)[1] or ''
+
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok or not parser then
+    return line
+  end
+  local lang = parser:lang()
+  local query = vim.treesitter.query.get(lang, 'highlights')
+  local tree = parser:parse({ fs - 1, fs })[1]
+  if not query or not tree then
+    return line
+  end
+
+  -- Per-column highlight group; highest treesitter priority wins on overlap.
+  local hl = {}
+  for id, node, metadata in query:iter_captures(tree:root(), bufnr, fs - 1, fs) do
+    local srow, scol, erow, ecol = node:range()
+    if srow == fs - 1 then
+      local group = '@' .. query.captures[id]
+      local prio = tonumber(metadata.priority) or 100
+      local cend = (erow == fs - 1) and ecol or #line
+      for c = scol, cend - 1 do
+        local cur = hl[c]
+        if not cur or prio >= cur.prio then
+          hl[c] = { group = group, prio = prio }
+        end
+      end
+    end
+  end
+
+  -- Coalesce adjacent same-group columns into chunks; uncaptured text -> Folded.
+  local chunks, i = {}, 0
+  while i < #line do
+    local g = hl[i] and hl[i].group or 'Folded'
+    local j = i
+    while j < #line and (hl[j] and hl[j].group or 'Folded') == g do
+      j = j + 1
+    end
+    chunks[#chunks + 1] = { line:sub(i + 1, j), g }
+    i = j
+  end
+  if #chunks == 0 then
+    chunks = { { line, 'Folded' } }
+  end
+  return chunks
+end
+vim.opt.foldtext = 'v:lua.custom_foldtext()'
 
 -- Automatically reload files changed outside of nvim
 vim.o.autoread = true
