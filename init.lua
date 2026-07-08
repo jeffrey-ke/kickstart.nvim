@@ -113,13 +113,16 @@ vim.o.wildignorecase = true -- Case-insensitive command-line completion
 -- Native tabline showing all listed buffers
 vim.api.nvim_create_autocmd('ColorScheme', {
   callback = function()
-    vim.api.nvim_set_hl(0, 'TabLineSel', { fg = '#000000', bg = '#98e6c8', ctermfg = 0, ctermbg = 121, bold = true })
-    vim.api.nvim_set_hl(0, 'TabLineModified', { fg = '#f7768e', ctermfg = 203, bold = true })
-    vim.cmd 'hi StatusLineFile guifg=#c0caf5 guibg=NONE ctermfg=189 ctermbg=NONE cterm=NONE'
-    vim.cmd 'hi StatusLineGit  guifg=#9ece6a guibg=NONE ctermfg=114 ctermbg=NONE cterm=NONE'
-    vim.cmd 'hi StatusLineLoc  guifg=#e0af68 guibg=NONE ctermfg=179 ctermbg=NONE cterm=NONE'
-    vim.cmd 'hi StatusLinePwd  guifg=#7dcfff guibg=NONE gui=bold ctermfg=117 ctermbg=NONE cterm=bold'
-    vim.cmd 'hi StatusLineNC   guifg=#3b4261 guibg=#3b4261 ctermfg=7 ctermbg=7'
+    -- ANSI-16 slots only, so these follow the terminal's Solarized palette:
+    -- 1 red, 2 green, 3 yellow, 6 cyan, 13 violet; 0/7 are the bg-adjacent grays.
+    local nc = vim.o.background == 'dark' and 0 or 7 -- fg=bg hides inactive statusline text
+    vim.api.nvim_set_hl(0, 'TabLineSel', { ctermfg = 0, ctermbg = 6, bold = true })
+    vim.api.nvim_set_hl(0, 'TabLineModified', { ctermfg = 1, bold = true })
+    vim.api.nvim_set_hl(0, 'StatusLineFile', { ctermfg = 13 })
+    vim.api.nvim_set_hl(0, 'StatusLineGit', { ctermfg = 2 })
+    vim.api.nvim_set_hl(0, 'StatusLineLoc', { ctermfg = 3 })
+    vim.api.nvim_set_hl(0, 'StatusLinePwd', { ctermfg = 6, bold = true })
+    vim.api.nvim_set_hl(0, 'StatusLineNC', { ctermfg = nc, ctermbg = nc })
   end,
 })
 vim.o.showtabline = 2
@@ -1335,38 +1338,40 @@ require('lazy').setup({
     },
   },
 })
--- Cursorline: storm blue_visual so the current line reads clearly against bg=#24283b
-vim.api.nvim_set_hl(0, 'CursorLine', { bg = '#2e3c64' })
+-- Background-aware ANSI-16 highlights. Re-applied on every colorscheme reload
+-- (:colorscheme runs :hi clear before firing ColorScheme) and once at startup,
+-- since the colorscheme has already loaded by the time this runs.
+local function set_ansi_ui_hl()
+  local dark = vim.o.background == 'dark'
+  local subtle = dark and 0 or 7 -- the gray one step off the current background
+  -- Subtle fill for the current line; same tone dims inactive windows.
+  vim.api.nvim_set_hl(0, 'CursorLine', { ctermbg = subtle })
+  vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = subtle })
+  -- High-contrast diffs (fugitive, :diffthis, etc.): accent slots with dark text
+  vim.api.nvim_set_hl(0, 'DiffAdd', { ctermbg = 2, ctermfg = 8 })
+  vim.api.nvim_set_hl(0, 'DiffDelete', { ctermbg = 1, ctermfg = 8 })
+  vim.api.nvim_set_hl(0, 'DiffChange', { ctermbg = 3, ctermfg = 8 })
+  vim.api.nvim_set_hl(0, 'DiffText', { ctermbg = 9, ctermfg = 8, bold = true })
+  -- Split separators: slot 10 (base01) reads on both light and dark backgrounds.
+  -- (Not slot 15 — that's identical to Solarized Light's default background.)
+  vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 10 })
+end
+set_ansi_ui_hl()
+vim.api.nvim_create_autocmd('ColorScheme', {
+  group = vim.api.nvim_create_augroup('ansi-ui-hl', { clear = true }),
+  callback = set_ansi_ui_hl,
+})
 
 -- Make snacks.nvim terminals transparent (Claude Code terminal)
 vim.api.nvim_set_hl(0, 'SnacksNormal', { bg = 'NONE' })
 vim.api.nvim_set_hl(0, 'SnacksNormalNC', { bg = 'NONE' })
 
--- Subdued which-key popup
-vim.api.nvim_set_hl(0, 'WhichKeyNormal', { bg = '#1a1b26' })
-vim.api.nvim_set_hl(0, 'WhichKeyBorder', { fg = '#3b4261', bg = '#1a1b26' })
-vim.api.nvim_set_hl(0, 'WhichKeyTitle', { fg = '#7aa2f7', bg = '#1a1b26' })
-
--- Python: make comments more readable against the vim colorscheme
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'python',
-  callback = function()
-    vim.api.nvim_set_hl(0, 'Comment', { fg = '#565f89', ctermfg = 103, italic = false })
-  end,
-})
-
 -- Highlight backtick-delimited prose (design notes, drafts) so it pops.
 -- Single-line: `prose here`   Multi-line block: ```...```
 -- Priority 200 beats treesitter (100).
 local function set_draft_prose_hl()
-  -- Background-only, like CursorLine. Keep the normal foreground.
-  -- ctermbg for terminals without termguicolors; bg (=guibg) for gui/true-color.
-  -- Bright yellow bg; force fg to black so text stays readable.
-  vim.api.nvim_set_hl(0, 'DraftProse', {
-    bg = '#ffff00', ctermbg = 226,
-    fg = '#000000', ctermfg = 0,
-    bold = true,
-  })
+  -- Solarized ANSI slots: yellow bg (3), darkest tone fg (8) so text stays readable.
+  vim.api.nvim_set_hl(0, 'DraftProse', { ctermbg = 3, ctermfg = 8, bold = true })
 end
 set_draft_prose_hl()
 vim.api.nvim_create_autocmd('ColorScheme', {
@@ -1412,9 +1417,14 @@ end
 vim.api.nvim_create_user_command('ToggleProse', toggle_draft_prose, { desc = 'Toggle backtick prose highlighting' })
 vim.keymap.set('n', '<leader>tp', toggle_draft_prose, { desc = '[T]oggle backtick [P]rose highlight' })
 
--- Dim inactive windows
-vim.api.nvim_set_hl(0, 'NormalNC', { bg = '#1f2335', ctermbg = 17 })
-vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', ctermfg = 15 })
+-- Match nvim's light/dark mode to the terminal theme after flipping it.
+-- The OptionSet autocmd (colorscheme spec) does the actual solarized reload.
+local function toggle_background()
+  vim.o.background = vim.o.background == 'dark' and 'light' or 'dark'
+  vim.notify('Background: ' .. vim.o.background, vim.log.levels.INFO)
+end
+vim.api.nvim_create_user_command('ToggleBackground', toggle_background, { desc = 'Flip light/dark to match terminal theme' })
+vim.keymap.set('n', '<leader>tb', toggle_background, { desc = '[T]oggle [B]ackground (light/dark)' })
 
 -- Flash the split separators red while a <leader> sequence is pending.
 -- There is no native "leader pressed" event (<leader> is a prefix), so we watch
@@ -1422,10 +1432,10 @@ vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', ctermfg = 15 })
 -- when the next key resolves the mapping or after 'timeoutlen' elapses.
 do
   local function set_normal()
-    vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#ffffff', ctermfg = 15 })
+    vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 10 })
   end
   local function set_active()
-    vim.api.nvim_set_hl(0, 'WinSeparator', { fg = '#f7768e', ctermfg = 203 })
+    vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 1 })
   end
   local leader = vim.api.nvim_replace_termcodes('<leader>', true, true, true)
   local uv = vim.uv or vim.loop
@@ -1459,17 +1469,6 @@ do
     end
   end, vim.api.nvim_create_namespace 'leader-winsep-flash')
 end
-
--- Subdued wildmenu/completion popup
-vim.api.nvim_set_hl(0, 'WildMenu', { bg = '#292e42', fg = '#c0caf5', ctermbg = 238, ctermfg = 7, bold = true })
-vim.api.nvim_set_hl(0, 'Pmenu', { bg = '#1f2335', fg = '#c0caf5', ctermbg = 236, ctermfg = 7 })
-vim.api.nvim_set_hl(0, 'PmenuSel', { bg = '#292e42', fg = '#c0caf5', ctermbg = 238, ctermfg = 15, bold = true })
-
--- High-contrast diffs (fugitive, :diffthis, etc.): green/red/yellow with black text
-vim.api.nvim_set_hl(0, 'DiffAdd', { bg = '#9ece6a', fg = '#000000', ctermbg = 150, ctermfg = 0 })
-vim.api.nvim_set_hl(0, 'DiffDelete', { bg = '#f7768e', fg = '#000000', ctermbg = 203, ctermfg = 0 })
-vim.api.nvim_set_hl(0, 'DiffChange', { bg = '#e0af68', fg = '#000000', ctermbg = 179, ctermfg = 0 })
-vim.api.nvim_set_hl(0, 'DiffText', { bg = '#e7c547', fg = '#000000', ctermbg = 185, ctermfg = 0, bold = true })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
