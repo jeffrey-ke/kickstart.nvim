@@ -97,8 +97,9 @@ vim.g.have_nerd_font = true
 vim.cmd.packadd 'cfilter'
 
 -- [[ Setting options ]]
--- Enable 24-bit RGB colors in the terminal
-vim.o.termguicolors = true
+-- ANSI-16 passthrough: highlights use cterm indices 0-15, so colors follow the
+-- terminal's palette (Solarized) — same idea as tmux's fg=terminal,bg=terminal
+vim.o.termguicolors = false
 
 -- [[ Wildmenu Configuration ]]
 vim.o.wildmode = 'longest:full' -- Tab completes to longest common prefix and shows menu; next Tab cycles
@@ -465,7 +466,6 @@ require('lazy').setup({
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
   'tpope/vim-fugitive',
   'tpope/vim-eunuch',
-  { 'ellisonleao/gruvbox.nvim', priority = 1000, config = true, opts = ... },
 
   {
     'folke/persistence.nvim',
@@ -1184,25 +1184,32 @@ require('lazy').setup({
     },
   },
 
-  { -- You can easily change to a different colorscheme.
-    -- Change the name of the colorscheme plugin below, and then
-    -- change the command in the config to whatever the name of that colorscheme is.
-    --
-    -- If you want to see what colorschemes are already installed, you can use `:Telescope colorscheme`.
-    'folke/tokyonight.nvim',
+  { -- Solarized in ANSI-16 mode: references terminal palette slots 0-15 instead of
+    -- fixed colors, so nvim mirrors whatever Solarized variant the terminal has loaded.
+    'altercation/vim-colors-solarized',
     priority = 1000, -- Make sure to load this before all the other start plugins.
     config = function()
-      ---@diagnostic disable-next-line: missing-fields
-      require('tokyonight').setup {
-        styles = {
-          comments = { italic = false }, -- Disable italics in comments
-        },
-      }
+      vim.g.solarized_termcolors = 16
+      vim.o.background = 'dark' -- fallback default; OSC-11 detection or :ToggleBackground may flip it
+      vim.cmd.colorscheme 'solarized'
+      vim.o.termguicolors = false -- defensive re-assert in case a later plugin flips it back on
 
-      -- Load the colorscheme here.
-      -- Like many other themes, this one has different styles, and you could load
-      -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-      vim.cmd.colorscheme 'tokyonight-storm'
+      -- Reload solarized whenever &background changes: absorbs nvim's async
+      -- OSC-11 startup detection and drives :ToggleBackground. nested=true is
+      -- required so the ColorScheme autocmds (statusline etc.) re-fire.
+      local reloading = false
+      vim.api.nvim_create_autocmd('OptionSet', {
+        pattern = 'background',
+        nested = true,
+        callback = function()
+          if reloading then
+            return
+          end
+          reloading = true
+          vim.cmd.colorscheme 'solarized'
+          reloading = false
+        end,
+      })
     end,
   },
 
