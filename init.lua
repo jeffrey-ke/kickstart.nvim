@@ -1193,7 +1193,7 @@ require('lazy').setup({
     priority = 1000, -- Make sure to load this before all the other start plugins.
     config = function()
       vim.g.solarized_termcolors = 16
-      vim.o.background = 'dark' -- fallback default; OSC-11 detection or :ToggleBackground may flip it
+      vim.o.background = 'light' -- fallback default; OSC-11 detection or :ToggleBackground may flip it
       vim.cmd.colorscheme 'solarized'
       vim.o.termguicolors = false -- defensive re-assert in case a later plugin flips it back on
 
@@ -1347,6 +1347,10 @@ local function set_ansi_ui_hl()
   -- Subtle fill for the current line; same tone dims inactive windows.
   vim.api.nvim_set_hl(0, 'CursorLine', { ctermbg = subtle })
   vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = subtle })
+  -- Gutter: comment-tone line numbers with no background strip; the current
+  -- line's number pops in orange (9) and continues the CursorLine fill.
+  vim.api.nvim_set_hl(0, 'LineNr', { ctermfg = dark and 10 or 14 })
+  vim.api.nvim_set_hl(0, 'CursorLineNr', { ctermfg = 9, ctermbg = subtle, bold = true })
   -- High-contrast diffs (fugitive, :diffthis, etc.): accent slots with dark text
   vim.api.nvim_set_hl(0, 'DiffAdd', { ctermbg = 2, ctermfg = 8 })
   vim.api.nvim_set_hl(0, 'DiffDelete', { ctermbg = 1, ctermfg = 8 })
