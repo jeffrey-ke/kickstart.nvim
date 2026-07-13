@@ -1359,6 +1359,15 @@ local function set_ansi_ui_hl()
   -- Split separators: slot 10 (base01) reads on both light and dark backgrounds.
   -- (Not slot 15 — that's identical to Solarized Light's default background.)
   vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 10 })
+  -- Inline code: bold blue text, no chip. render-markdown's inline extmark
+  -- (RenderMarkdownCodeInline, priority 140) links to ColorColumn (grey bg, no fg), so the
+  -- treesitter red (@markup.raw -> Special) shows through -> red-on-grey. A neutral fg on
+  -- the grey chip reads muddy (grey-on-grey) in light mode, so drop the bg entirely (no
+  -- ctermbg) and distinguish code by hue instead: blue (4), matching the box-free code
+  -- blocks. ~4:1 (AA-large; Solarized accents can't beat that on the light bg). The
+  -- explicit fg overrides the red (priority 140 > treesitter 100). blue isn't base-swapped,
+  -- so one slot works in both modes.
+  vim.api.nvim_set_hl(0, 'RenderMarkdownCodeInline', { ctermfg = 4, bold = true })
 end
 set_ansi_ui_hl()
 vim.api.nvim_create_autocmd('ColorScheme', {
