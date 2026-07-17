@@ -1287,6 +1287,12 @@ require('lazy').setup({
         --  If you are experiencing weird indenting issues, add the language to
         --  the list of additional_vim_regex_highlighting and disabled languages for indent.
         additional_vim_regex_highlighting = { 'ruby' },
+        -- VimTeX's own :syntax-based highlighting (and its conceal feature,
+        -- e.g. \alpha -> α) only attaches if treesitter isn't already
+        -- highlighting the buffer -- confirmed via vimtex's maintainer
+        -- (github.com/lervag/vimtex issue #3131): disabling treesitter
+        -- highlighting for latex specifically is the documented fix.
+        disable = { 'latex' },
       },
       indent = { enable = true, disable = { 'ruby' } },
     },
