@@ -1100,7 +1100,7 @@ require('lazy').setup({
           --   end,
           -- },
         },
-        opts = {},
+        opts = { enable_autosnippets = true },
       },
       'folke/lazydev.nvim',
     },
