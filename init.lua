@@ -648,8 +648,8 @@ require('lazy').setup({
         },
         pickers = {
           find_files = {
-            hidden = true
-          }
+            hidden = true,
+          },
         },
         extensions = {
           ['ui-select'] = {
@@ -1244,19 +1244,25 @@ require('lazy').setup({
       -- set use_icons to true if you have a Nerd Font
       statusline.setup { use_icons = vim.g.have_nerd_font }
 
----@diagnostic disable-next-line: duplicate-set-field
+      ---@diagnostic disable-next-line: duplicate-set-field
       statusline.active = function()
         local mode, mode_hl = statusline.section_mode { trunc_width = 120 }
         local git = statusline.section_git { trunc_width = 75 }
         local diagnostics = statusline.section_diagnostics { trunc_width = 75 }
         local path = vim.fn.expand '%:.'
-        if path == '' then path = '[No Name]' end
+        if path == '' then
+          path = '[No Name]'
+        end
         local filename = path .. (vim.bo.modified and '[+]' or '') .. (vim.bo.readonly and '[RO]' or '')
         local pwd = vim.fn.getcwd():gsub('^' .. vim.env.HOME, '~')
 
         local s = '%#' .. mode_hl .. '# ' .. mode .. ' '
-        if git ~= '' then s = s .. '%#StatusLineGit# ' .. git .. ' ' end
-        if diagnostics ~= '' then s = s .. '%#StatusLineGit# ' .. diagnostics .. ' ' end
+        if git ~= '' then
+          s = s .. '%#StatusLineGit# ' .. git .. ' '
+        end
+        if diagnostics ~= '' then
+          s = s .. '%#StatusLineGit# ' .. diagnostics .. ' '
+        end
         s = s .. '%<%#StatusLinePwd# ' .. pwd .. ' '
         s = s .. '%=%#StatusLineLoc# %2l:%-2v %#StatusLineFile# ' .. filename .. ' '
         return s
@@ -1402,12 +1408,16 @@ local function clear_draft_match()
 end
 
 local function apply_draft_match()
-  if not vim.g.draft_prose_enabled then return end
-  for _, m in ipairs(vim.fn.getmatches()) do
-    if m.group == 'DraftProse' then return end  -- already applied
+  if not vim.g.draft_prose_enabled then
+    return
   end
-  vim.fn.matchadd('DraftProse', [[`[^`]*`]], 200)  -- closed: `prose`
-  vim.fn.matchadd('DraftProse', [[`[^`]*$]], 200)  -- to EOL: `prose
+  for _, m in ipairs(vim.fn.getmatches()) do
+    if m.group == 'DraftProse' then
+      return
+    end -- already applied
+  end
+  vim.fn.matchadd('DraftProse', [[`[^`]*`]], 200) -- closed: `prose`
+  vim.fn.matchadd('DraftProse', [[`[^`]*$]], 200) -- to EOL: `prose
 end
 vim.api.nvim_create_autocmd({ 'BufWinEnter', 'WinNew' }, {
   group = vim.api.nvim_create_augroup('draft-prose-match', { clear = true }),
