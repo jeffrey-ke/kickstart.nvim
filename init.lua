@@ -1154,6 +1154,11 @@ require('lazy').setup({
         default = { 'lsp', 'path', 'snippets', 'buffer', 'lazydev' },
         providers = {
           lazydev = { module = 'lazydev.integrations.blink', score_offset = 100 },
+          -- Without this, snippets keep blink.cmp's built-in -1 default while
+          -- buffer is boosted to 10 below, so buffer-word matches outrank
+          -- snippet triggers (e.g. typing "item" would rank the literal word
+          -- "item" from elsewhere in the buffer above the itemize snippet).
+          snippets = { score_offset = 15 },
           buffer = {
             score_offset = 10,
             opts = {
