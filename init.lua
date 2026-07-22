@@ -1329,10 +1329,12 @@ require('lazy').setup({
   --
   --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
   { import = 'custom.plugins' },
-  -- myvimtex: the LaTeX layer as a local plugin; every spec inside is
-  -- ft = 'tex', so coding sessions never source any of it.
-  -- TEMPORARY dir — becomes a dotfiles-submodule derivation in Phase 3.
-  { dir = '/Users/jke/repo/myvimtex/.claude/worktrees/as-plugin-exec', import = 'latex.plugins' },
+  -- myvimtex: the LaTeX layer, a dotfiles-submodule lazy plugin; every
+  -- spec inside is ft = 'tex', so coding sessions never source any of it.
+  -- ~/.config/nvim resolves into the dotfiles root; the submodule sits
+  -- beside this config there.
+  { dir = vim.fs.dirname(vim.fn.resolve(vim.fn.stdpath 'config')) .. '/myvimtex',
+    import = 'latex.plugins' },
   --
   -- For additional information with loading, sourcing and examples see `:help lazy.nvim-🔌-plugin-spec`
   -- Or use telescope!
