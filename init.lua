@@ -97,9 +97,9 @@ vim.g.have_nerd_font = true
 vim.cmd.packadd 'cfilter'
 
 -- [[ Setting options ]]
--- ANSI-16 passthrough: highlights use cterm indices 0-15, so colors follow the
--- terminal's palette (Solarized) — same idea as tmux's fg=terminal,bg=terminal
-vim.o.termguicolors = false
+-- True color: colorscheme picks fixed RGB values directly, independent of
+-- whatever palette the terminal emulator itself is configured with.
+vim.o.termguicolors = true
 
 -- [[ Wildmenu Configuration ]]
 vim.o.wildmode = 'longest:full' -- Tab completes to longest common prefix and shows menu; next Tab cycles
@@ -111,13 +111,15 @@ vim.o.wildignorecase = true -- Case-insensitive command-line completion
 --  For more options, you can see `:help option-list`
 
 -- Native tabline showing all listed buffers
+-- TabLineSel/TabLineModified: no override — nvim_set_hl replaces the whole
+-- definition rather than merging, so a cterm-only override under
+-- termguicolors=true blanks out seoul256's own (correct) gui colors entirely,
+-- falling back to the terminal's raw default fg/bg instead. Let seoul256 own
+-- TabLineSel directly; TabLineModified falls back to plain text (no more
+-- custom red/bold) until it gets a real gui color.
 vim.api.nvim_create_autocmd('ColorScheme', {
   callback = function()
-    -- ANSI-16 slots only, so these follow the terminal's Solarized palette:
-    -- 1 red, 2 green, 3 yellow, 6 cyan, 13 violet; 0/7 are the bg-adjacent grays.
     local nc = vim.o.background == 'dark' and 0 or 7 -- fg=bg hides inactive statusline text
-    vim.api.nvim_set_hl(0, 'TabLineSel', { ctermfg = 0, ctermbg = 6, bold = true })
-    vim.api.nvim_set_hl(0, 'TabLineModified', { ctermfg = 1, bold = true })
     vim.api.nvim_set_hl(0, 'StatusLineFile', { ctermfg = 13 })
     vim.api.nvim_set_hl(0, 'StatusLineGit', { ctermfg = 2 })
     vim.api.nvim_set_hl(0, 'StatusLineLoc', { ctermfg = 3 })
@@ -1192,17 +1194,18 @@ require('lazy').setup({
     },
   },
 
-  { -- Solarized in ANSI-16 mode: references terminal palette slots 0-15 instead of
-    -- fixed colors, so nvim mirrors whatever Solarized variant the terminal has loaded.
-    'altercation/vim-colors-solarized',
+  { -- seoul256, true-color mode: fixed RGB values baked into the colorscheme.
+    -- Dark and light are separate colorscheme names (seoul256 / seoul256-light),
+    -- unlike solarized's single name + &background toggle.
+    'junegunn/seoul256.vim',
     priority = 1000, -- Make sure to load this before all the other start plugins.
     config = function()
-      vim.g.solarized_termcolors = 16
-      vim.o.background = 'light' -- fallback default; OSC-11 detection or :ToggleBackground may flip it
-      vim.cmd.colorscheme 'solarized'
-      vim.o.termguicolors = false -- defensive re-assert in case a later plugin flips it back on
+      vim.g.seoul256_light_background = 256 -- lightest of the 252-256 light range
+      vim.o.background = 'light' -- default; :ToggleBackground flips it
+      vim.cmd.colorscheme 'seoul256-light'
+      vim.o.termguicolors = true -- defensive re-assert in case a later plugin flips it off
 
-      -- Reload solarized whenever &background changes: absorbs nvim's async
+      -- Reload seoul256 whenever &background changes: absorbs nvim's async
       -- OSC-11 startup detection and drives :ToggleBackground. nested=true is
       -- required so the ColorScheme autocmds (statusline etc.) re-fire.
       local reloading = false
@@ -1214,7 +1217,7 @@ require('lazy').setup({
             return
           end
           reloading = true
-          vim.cmd.colorscheme 'solarized'
+          vim.cmd.colorscheme(vim.o.background == 'dark' and 'seoul256' or 'seoul256-light')
           reloading = false
         end,
       })
