@@ -111,11 +111,37 @@ vim.o.wildignorecase = true -- Case-insensitive command-line completion
 --  For more options, you can see `:help option-list`
 
 -- Native tabline showing all listed buffers.
--- Nothing in this config overrides TabLine*/StatusLine*/UI highlight groups.
+-- This config overrides no TabLine*/StatusLine*/UI group with a fixed color.
 -- nvim_set_hl replaces a group rather than merging, so a cterm-only override
 -- under termguicolors=true blanks out seoul256's own (correct) gui colors
 -- entirely and the element renders with no color at all. The colorscheme owns
--- every group; TabLineModified is simply undefined and renders as plain text.
+-- every group.
+--
+-- The one exception is the [+] modified badge, and it still hardcodes nothing:
+-- it inverts each cell's own fg/bg pair. That reads on both the inactive cell
+-- and the (teal) selected cell, and in light or dark, which no single accent
+-- color does -- and it needs no maintenance when the colorscheme changes.
+-- TabLine ships without an fg, so Normal fills in the gaps. cterm values are
+-- set alongside gui ones so this survives a terminal without truecolor; the old
+-- bug was being cterm-*only*, not setting cterm at all.
+local function set_tabline_modified()
+  local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
+  for badge, base_name in pairs { TabLineModified = 'TabLine', TabLineSelModified = 'TabLineSel' } do
+    local base = vim.api.nvim_get_hl(0, { name = base_name, link = false })
+    vim.api.nvim_set_hl(0, badge, {
+      fg = base.bg or normal.bg,
+      bg = base.fg or normal.fg,
+      ctermfg = base.ctermbg or normal.ctermbg,
+      ctermbg = base.ctermfg or normal.ctermfg,
+      bold = true,
+    })
+  end
+end
+set_tabline_modified()
+vim.api.nvim_create_autocmd('ColorScheme', {
+  group = vim.api.nvim_create_augroup('tabline-modified-hl', { clear = true }),
+  callback = set_tabline_modified,
+})
 vim.o.showtabline = 2
 function _G.custom_tabline()
   local bufs = {}
@@ -125,9 +151,14 @@ function _G.custom_tabline()
       if name == '' then
         name = '[No Name]'
       end
-      local modified = vim.bo[buf].modified and '%#TabLineModified# [+]' or ''
       local is_current = buf == vim.api.nvim_get_current_buf()
       local hl = is_current and '%#TabLineSel#' or '%#TabLine#'
+      -- Switch back to `hl` after the badge, or the cell's trailing space stays
+      -- in the badge highlight and the chip looks ragged on the right.
+      local modified = ''
+      if vim.bo[buf].modified then
+        modified = ' ' .. (is_current and '%#TabLineSelModified#' or '%#TabLineModified#') .. '[+]' .. hl
+      end
       table.insert(bufs, hl .. ' ' .. name .. modified .. ' ')
     end
   end
