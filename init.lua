@@ -110,23 +110,12 @@ vim.o.wildignorecase = true -- Case-insensitive command-line completion
 -- NOTE: You can change these options as you wish!
 --  For more options, you can see `:help option-list`
 
--- Native tabline showing all listed buffers
--- TabLineSel/TabLineModified: no override — nvim_set_hl replaces the whole
--- definition rather than merging, so a cterm-only override under
--- termguicolors=true blanks out seoul256's own (correct) gui colors entirely,
--- falling back to the terminal's raw default fg/bg instead. Let seoul256 own
--- TabLineSel directly; TabLineModified falls back to plain text (no more
--- custom red/bold) until it gets a real gui color.
-vim.api.nvim_create_autocmd('ColorScheme', {
-  callback = function()
-    local nc = vim.o.background == 'dark' and 0 or 7 -- fg=bg hides inactive statusline text
-    vim.api.nvim_set_hl(0, 'StatusLineFile', { ctermfg = 13 })
-    vim.api.nvim_set_hl(0, 'StatusLineGit', { ctermfg = 2 })
-    vim.api.nvim_set_hl(0, 'StatusLineLoc', { ctermfg = 3 })
-    vim.api.nvim_set_hl(0, 'StatusLinePwd', { ctermfg = 6, bold = true })
-    vim.api.nvim_set_hl(0, 'StatusLineNC', { ctermfg = nc, ctermbg = nc })
-  end,
-})
+-- Native tabline showing all listed buffers.
+-- Nothing in this config overrides TabLine*/StatusLine*/UI highlight groups.
+-- nvim_set_hl replaces a group rather than merging, so a cterm-only override
+-- under termguicolors=true blanks out seoul256's own (correct) gui colors
+-- entirely and the element renders with no color at all. The colorscheme owns
+-- every group; TabLineModified is simply undefined and renders as plain text.
 vim.o.showtabline = 2
 function _G.custom_tabline()
   local bufs = {}
@@ -259,59 +248,15 @@ vim.opt.foldmethod = 'expr'
 vim.opt.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
 vim.opt.foldlevelstart = 99
 -- Keep syntax-highlighted (colored) text in the fold line instead of uniform grey.
--- Applies to all folds; the grey Folded background fill is preserved by the fillchars.
--- NOTE: this nvim build lacks the builtin vim.treesitter.foldtext, so we roll our own:
--- emit the fold's first line as treesitter-highlighted {text, group} chunks.
-function _G.custom_foldtext()
-  local fs = vim.v.foldstart
-  local bufnr = vim.api.nvim_get_current_buf()
-  local line = vim.api.nvim_buf_get_lines(bufnr, fs - 1, fs, false)[1] or ''
+-- An empty 'foldtext' is nvim's native way to do this (since 0.10): "foldtext is
+-- disabled, and the line is displayed normally with highlighting and no line
+-- wrapping" — see :help 'foldtext'. This replaces a hand-rolled foldtext function
+-- that walked the treesitter highlights query to emit {text, group} chunks itself.
+vim.opt.foldtext = ''
 
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if not ok or not parser then
-    return line
-  end
-  local lang = parser:lang()
-  local query = vim.treesitter.query.get(lang, 'highlights')
-  local tree = parser:parse({ fs - 1, fs })[1]
-  if not query or not tree then
-    return line
-  end
-
-  -- Per-column highlight group; highest treesitter priority wins on overlap.
-  local hl = {}
-  for id, node, metadata in query:iter_captures(tree:root(), bufnr, fs - 1, fs) do
-    local srow, scol, erow, ecol = node:range()
-    if srow == fs - 1 then
-      local group = '@' .. query.captures[id]
-      local prio = tonumber(metadata.priority) or 100
-      local cend = (erow == fs - 1) and ecol or #line
-      for c = scol, cend - 1 do
-        local cur = hl[c]
-        if not cur or prio >= cur.prio then
-          hl[c] = { group = group, prio = prio }
-        end
-      end
-    end
-  end
-
-  -- Coalesce adjacent same-group columns into chunks; uncaptured text -> Folded.
-  local chunks, i = {}, 0
-  while i < #line do
-    local g = hl[i] and hl[i].group or 'Folded'
-    local j = i
-    while j < #line and (hl[j] and hl[j].group or 'Folded') == g do
-      j = j + 1
-    end
-    chunks[#chunks + 1] = { line:sub(i + 1, j), g }
-    i = j
-  end
-  if #chunks == 0 then
-    chunks = { { line, 'Folded' } }
-  end
-  return chunks
-end
-vim.opt.foldtext = 'v:lua.custom_foldtext()'
+-- Soft wrap, breaking at word boundaries rather than mid-word.
+vim.opt.wrap = true
+vim.opt.linebreak = true
 
 -- Automatically reload files changed outside of nvim
 vim.o.autoread = true
@@ -1264,15 +1209,18 @@ require('lazy').setup({
         local filename = path .. (vim.bo.modified and '[+]' or '') .. (vim.bo.readonly and '[RO]' or '')
         local pwd = vim.fn.getcwd():gsub('^' .. vim.env.HOME, '~')
 
-        local s = '%#' .. mode_hl .. '# ' .. mode .. ' '
+        -- Only the mode section is colored, by mini's own MiniStatuslineMode*
+        -- groups; everything after it resets to StatusLine so the colorscheme
+        -- owns the bar. The section layout is the customization here, not the hues.
+        local s = '%#' .. mode_hl .. '# ' .. mode .. ' %#StatusLine#'
         if git ~= '' then
-          s = s .. '%#StatusLineGit# ' .. git .. ' '
+          s = s .. ' ' .. git .. ' '
         end
         if diagnostics ~= '' then
-          s = s .. '%#StatusLineGit# ' .. diagnostics .. ' '
+          s = s .. ' ' .. diagnostics .. ' '
         end
-        s = s .. '%<%#StatusLinePwd# ' .. pwd .. ' '
-        s = s .. '%=%#StatusLineLoc# %2l:%-2v %#StatusLineFile# ' .. filename .. ' '
+        s = s .. '%< ' .. pwd .. ' '
+        s = s .. '%= %2l:%-2v  ' .. filename .. ' '
         return s
       end
 
@@ -1364,104 +1312,22 @@ require('lazy').setup({
     },
   },
 })
--- Background-aware ANSI-16 highlights. Re-applied on every colorscheme reload
--- (:colorscheme runs :hi clear before firing ColorScheme) and once at startup,
--- since the colorscheme has already loaded by the time this runs.
-local function set_ansi_ui_hl()
-  local dark = vim.o.background == 'dark'
-  local subtle = dark and 0 or 7 -- the gray one step off the current background
-  -- Subtle fill for the current line; same tone dims inactive windows.
-  vim.api.nvim_set_hl(0, 'CursorLine', { ctermbg = subtle })
-  vim.api.nvim_set_hl(0, 'NormalNC', { ctermbg = subtle })
-  -- Gutter: comment-tone line numbers with no background strip; the current
-  -- line's number pops in orange (9) and continues the CursorLine fill.
-  vim.api.nvim_set_hl(0, 'LineNr', { ctermfg = dark and 10 or 14 })
-  vim.api.nvim_set_hl(0, 'CursorLineNr', { ctermfg = 9, ctermbg = subtle, bold = true })
-  -- High-contrast diffs (fugitive, :diffthis, etc.): accent slots with dark text
-  vim.api.nvim_set_hl(0, 'DiffAdd', { ctermbg = 2, ctermfg = 8 })
-  vim.api.nvim_set_hl(0, 'DiffDelete', { ctermbg = 1, ctermfg = 8 })
-  vim.api.nvim_set_hl(0, 'DiffChange', { ctermbg = 3, ctermfg = 8 })
-  vim.api.nvim_set_hl(0, 'DiffText', { ctermbg = 9, ctermfg = 8, bold = true })
-  -- Split separators: slot 10 (base01) reads on both light and dark backgrounds.
-  -- (Not slot 15 — that's identical to Solarized Light's default background.)
-  vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 10 })
-  -- Inline code: bold blue text, no chip. render-markdown's inline extmark
-  -- (RenderMarkdownCodeInline, priority 140) links to ColorColumn (grey bg, no fg), so the
-  -- treesitter red (@markup.raw -> Special) shows through -> red-on-grey. A neutral fg on
-  -- the grey chip reads muddy (grey-on-grey) in light mode, so drop the bg entirely (no
-  -- ctermbg) and distinguish code by hue instead: blue (4), matching the box-free code
-  -- blocks. ~4:1 (AA-large; Solarized accents can't beat that on the light bg). The
-  -- explicit fg overrides the red (priority 140 > treesitter 100). blue isn't base-swapped,
-  -- so one slot works in both modes.
-  vim.api.nvim_set_hl(0, 'RenderMarkdownCodeInline', { ctermfg = 4, bold = true })
+-- Make snacks.nvim terminals transparent (Claude Code terminal).
+-- Inside a ColorScheme autocmd, not a bare call: :colorscheme runs :hi clear
+-- first, so a one-shot override at startup is wiped by the first
+-- :ToggleBackground. Applied once here too, since seoul256 has already loaded.
+local function set_snacks_transparent()
+  vim.api.nvim_set_hl(0, 'SnacksNormal', { bg = 'NONE' })
+  vim.api.nvim_set_hl(0, 'SnacksNormalNC', { bg = 'NONE' })
 end
-set_ansi_ui_hl()
+set_snacks_transparent()
 vim.api.nvim_create_autocmd('ColorScheme', {
-  group = vim.api.nvim_create_augroup('ansi-ui-hl', { clear = true }),
-  callback = set_ansi_ui_hl,
+  group = vim.api.nvim_create_augroup('snacks-transparent', { clear = true }),
+  callback = set_snacks_transparent,
 })
-
--- Make snacks.nvim terminals transparent (Claude Code terminal)
-vim.api.nvim_set_hl(0, 'SnacksNormal', { bg = 'NONE' })
-vim.api.nvim_set_hl(0, 'SnacksNormalNC', { bg = 'NONE' })
-
--- Highlight backtick-delimited prose (design notes, drafts) so it pops.
--- Single-line: `prose here`   Multi-line block: ```...```
--- Priority 200 beats treesitter (100).
-local function set_draft_prose_hl()
-  -- Solarized ANSI slots: yellow bg (3), darkest tone fg (8) so text stays readable.
-  vim.api.nvim_set_hl(0, 'DraftProse', { ctermbg = 3, ctermfg = 8, bold = true })
-end
-set_draft_prose_hl()
-vim.api.nvim_create_autocmd('ColorScheme', {
-  group = vim.api.nvim_create_augroup('draft-prose-hl', { clear = true }),
-  callback = set_draft_prose_hl,
-})
-vim.g.draft_prose_enabled = false
-
-local function clear_draft_match()
-  for _, m in ipairs(vim.fn.getmatches()) do
-    if m.group == 'DraftProse' then
-      vim.fn.matchdelete(m.id)
-    end
-  end
-end
-
-local function apply_draft_match()
-  if not vim.g.draft_prose_enabled then
-    return
-  end
-  for _, m in ipairs(vim.fn.getmatches()) do
-    if m.group == 'DraftProse' then
-      return
-    end -- already applied
-  end
-  vim.fn.matchadd('DraftProse', [[`[^`]*`]], 200) -- closed: `prose`
-  vim.fn.matchadd('DraftProse', [[`[^`]*$]], 200) -- to EOL: `prose
-end
-vim.api.nvim_create_autocmd({ 'BufWinEnter', 'WinNew' }, {
-  group = vim.api.nvim_create_augroup('draft-prose-match', { clear = true }),
-  callback = apply_draft_match,
-})
--- Apply to windows already open when this config loads.
-for _, win in ipairs(vim.api.nvim_list_wins()) do
-  vim.api.nvim_win_call(win, apply_draft_match)
-end
-
--- Toggle backtick prose highlighting across every window.
-local function toggle_draft_prose()
-  vim.g.draft_prose_enabled = not vim.g.draft_prose_enabled
-  local fn = vim.g.draft_prose_enabled and apply_draft_match or clear_draft_match
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    vim.api.nvim_win_call(win, fn)
-  end
-  vim.notify('Backtick prose highlight ' .. (vim.g.draft_prose_enabled and 'on' or 'off'), vim.log.levels.INFO)
-end
-vim.api.nvim_create_user_command('ToggleProse', toggle_draft_prose, { desc = 'Toggle backtick prose highlighting' })
-vim.keymap.set('n', '<leader>tp', toggle_draft_prose, { desc = '[T]oggle backtick [P]rose highlight' })
 
 -- Match nvim's light/dark mode to the terminal theme after flipping it.
--- The OptionSet autocmd (colorscheme spec) does the actual solarized reload.
+-- The OptionSet autocmd (colorscheme spec) does the actual seoul256 reload.
 local function toggle_background()
   vim.o.background = vim.o.background == 'dark' and 'light' or 'dark'
   vim.notify('Background: ' .. vim.o.background, vim.log.levels.INFO)
@@ -1469,51 +1335,5 @@ end
 vim.api.nvim_create_user_command('ToggleBackground', toggle_background, { desc = 'Flip light/dark to match terminal theme' })
 vim.keymap.set('n', '<leader>tb', toggle_background, { desc = '[T]oggle [B]ackground (light/dark)' })
 
--- Flash the split separators red while a <leader> sequence is pending.
--- There is no native "leader pressed" event (<leader> is a prefix), so we watch
--- keystrokes with vim.on_key: arm on <leader> in normal/visual mode, then restore
--- when the next key resolves the mapping or after 'timeoutlen' elapses.
-do
-  local function set_normal()
-    vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 10 })
-  end
-  local function set_active()
-    vim.api.nvim_set_hl(0, 'WinSeparator', { ctermfg = 1 })
-  end
-  local leader = vim.api.nvim_replace_termcodes('<leader>', true, true, true)
-  local uv = vim.uv or vim.loop
-  local timer = uv.new_timer()
-  local active = false
-
-  local function restore()
-    if not active then
-      return
-    end
-    active = false
-    vim.schedule(set_normal)
-  end
-
-  vim.on_key(function(_, typed)
-    if typed == '' then
-      return
-    end
-    local mode = vim.api.nvim_get_mode().mode
-    local leaderish = mode == 'n' or mode == 'v' or mode == 'V' or mode == '\22'
-
-    if typed == leader and leaderish then
-      active = true
-      vim.schedule(set_active)
-      timer:stop()
-      timer:start(vim.o.timeoutlen, 0, restore)
-    elseif active then
-      -- a follow-up key resolved (or aborted) the leader mapping
-      timer:stop()
-      restore()
-    end
-  end, vim.api.nvim_create_namespace 'leader-winsep-flash')
-end
-
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
-vim.opt.wrap = true
-vim.opt.linebreak = true
