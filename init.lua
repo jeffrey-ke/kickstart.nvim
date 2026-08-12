@@ -1231,6 +1231,16 @@ require('lazy').setup({
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
+    -- Pin the branch. nvim-treesitter's default branch is now `main`, a ground-up
+    -- rewrite with no `nvim-treesitter.configs` module — so without this, lazy
+    -- resolves the update target from remotes/origin/HEAD and `:Lazy update` would
+    -- move this checkout onto the rewrite, breaking the `main`/`opts` block below.
+    -- (`:Lazy restore` was never the risk: it checks out the lockfile's commit.)
+    -- master declares "Neovim 0.10 or 0.11 (Neovim 0.12 is not supported)" and we
+    -- are on 0.12.4, so this is a holding action — it works today, but the real
+    -- resolutions are migrating to `main` or following upstream kickstart, which
+    -- has since dropped lazy.nvim for `vim.pack` entirely.
+    branch = 'master',
     main = 'nvim-treesitter.configs', -- Sets main module to use for opts
     -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
     opts = {
