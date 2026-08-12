@@ -1,5 +1,22 @@
 # Statusline overhaul — colors, path, splits
 
+> **PARTLY SUPERSEDED 2026-08-11.** The four `StatusLine*` groups this plan
+> created were deleted: they were `ctermfg`-only, and once `termguicolors` was
+> turned on (`ffbe480`) they rendered with no color while still erasing
+> seoul256's own `StatusLine`. The statusline now colors only the mode section,
+> via mini's `MiniStatuslineMode*` groups, and resets to `StatusLine` after it.
+> See `../../../../.docs_claude/plans/completed/nvim-cterm-highlight-layer-removal.md`.
+>
+> **Still shipped:** the layout — relative path, no `section_fileinfo`,
+> `laststatus=3` — and the override-on-the-module-table technique.
+>
+> **The "Pattern worth remembering" section below is still correct and was used
+> again:** Snacks' transparency override was a bare call, so the first
+> `:ToggleBackground` wiped it; it now lives in a `ColorScheme` autocmd. The
+> closing line about `termguicolors = false` making `fg = '#hex'` silently
+> ignored is what the whole cleanup was ultimately about — read it inverted:
+> with `termguicolors = true`, `ctermfg = N` is the half that gets ignored.
+
 Changes made to `init.lua` (mini.statusline config block + the `ColorScheme` autocmd near line 113).
 
 ## What was done
