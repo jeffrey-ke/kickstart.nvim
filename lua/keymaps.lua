@@ -49,20 +49,29 @@ local function jump_to_node_start(node)
   vim.api.nvim_win_set_cursor(0, { row + 1, 0 })
 end
 
-vim.keymap.set('n', 'zf', function()
+-- Move to the enclosing function's first line, then run a fold command there.
+-- The guard matters: za/zO throw E490 "No fold found" on a line with no fold, and
+-- that is exactly the case where there was no function to jump to either (a
+-- top-level statement, the import block, a blank line). foldlevel > 0 means some
+-- fold contains this line, so the command has something to act on.
+local function fold_at_enclosing_function(keys)
   local node = enclosing_function_node()
   if node then
     jump_to_node_start(node)
   end
-  vim.cmd 'normal! za'
+  if vim.fn.foldlevel(vim.fn.line '.') == 0 then
+    vim.notify('No fold here', vim.log.levels.INFO)
+    return
+  end
+  vim.cmd('normal! ' .. keys)
+end
+
+vim.keymap.set('n', 'zf', function()
+  fold_at_enclosing_function 'za'
 end, { desc = 'Toggle enclosing function fold' })
 
 vim.keymap.set('n', 'zF', function()
-  local node = enclosing_function_node()
-  if node then
-    jump_to_node_start(node)
-  end
-  vim.cmd 'normal! zMzO'
+  fold_at_enclosing_function 'zMzO'
 end, { desc = 'Focus enclosing function (fold all others)' })
 -- vim.keymap.set('n', '<Tab>', 'za', { desc = 'Toggle fold under cursor' }) -- conflicts with <C-i> jumplist
 vim.keymap.set('n', '<S-Tab>', 'zA', { desc = 'Toggle fold under cursor (recursive)' })
