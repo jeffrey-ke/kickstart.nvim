@@ -145,6 +145,18 @@ vim.keymap.set('n', '<leader>yp', function()
   vim.notify('Copied: ' .. path, vim.log.levels.INFO)
 end, { desc = 'Yank absolute [P]ath of current file' })
 
+-- The RPC socket, for handing this session to an external agent that will drive it
+-- with `nvim --server <socket> --remote-expr ...`.
+vim.keymap.set('n', '<leader>ys', function()
+  local server = vim.v.servername
+  if server == '' then
+    vim.notify('This session has no RPC server', vim.log.levels.WARN)
+    return
+  end
+  vim.fn.setreg('+', server)
+  vim.notify('Copied: ' .. server, vim.log.levels.INFO)
+end, { desc = 'Yank nvim [S]ervername (RPC socket)' })
+
 vim.keymap.set('n', 'g;', 'g;zz')
 
 -- Command abbreviations
