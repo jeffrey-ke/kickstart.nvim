@@ -330,6 +330,67 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
   end,
 })
 
+-- [[ Spell checking ]]
+-- The Lua port of the .vimrc spell layer (dotfiles/.vimrc:57-86). Both editors
+-- read the same repo-tracked word list, so a `zg` in either one travels between
+-- machines.
+
+-- 'en_us' is a *region* inside the bundled en.utf-8.spl (nvim ships it in
+-- $VIMRUNTIME/spell/), so spellfile.vim never prompts to download anything.
+-- British spellings are then flagged as SpellRare rather than SpellBad.
+vim.o.spelllang = 'en_us'
+
+-- Words added with zg go in the dotfiles repo so they are version-controlled.
+-- nvim's default is the first 'runtimepath' entry -- i.e. this submodule, whose
+-- .gitignore:6 ignores spell/ -- so zg words would be dropped on the floor.
+-- expand() because 'spellfile' takes a comma-separated list of names, and the
+-- '~' in one is not expanded when the value is set from Lua.
+vim.opt.spellfile = vim.fn.expand '~/dotfiles/spell/en.utf-8.add'
+
+-- Check camelCase/snake_case parts separately instead of reading an identifier
+-- as one long typo.
+vim.opt.spelloptions:append 'camel'
+
+-- The .add list is plain text, but vim only ever reads the compiled .add.spl
+-- beside it, and *.spl is gitignored (spell/.gitignore) as a binary artifact.
+-- `zg` recompiles on add, but a fresh clone has no .add.spl at all, and a pull
+-- that brings words in from another machine leaves the existing one stale -- in
+-- both cases every tracked word is silently treated as a typo. getftime() is -1
+-- for a missing file, so the same comparison covers both. Two stats at startup,
+-- and the rebuild is rare; doing it here rather than lazily means the .spl is in
+-- place before the first prose buffer loads it, so no reload dance is needed.
+local spell_add = vim.fn.expand '~/dotfiles/spell/en.utf-8.add'
+if vim.fn.filereadable(spell_add) == 1 and vim.fn.getftime(spell_add) > vim.fn.getftime(spell_add .. '.spl') then
+  pcall(vim.cmd, 'silent! mkspell! ' .. vim.fn.fnameescape(spell_add))
+end
+
+-- Prose filetypes only -- a global 'spell' underlines every identifier in code.
+-- tex/plaintex are the filetypes the myvimtex layer loads on.
+vim.api.nvim_create_autocmd('FileType', {
+  desc = 'Enable spell checking in prose buffers',
+  group = vim.api.nvim_create_augroup('spell-prose', { clear = true }),
+  pattern = { 'tex', 'plaintex', 'markdown', 'text', 'gitcommit', 'rst' },
+  callback = function()
+    vim.opt_local.spell = true
+  end,
+})
+
+-- Journal entries are named by date (~/journal/aug18) with no extension, so they
+-- get no filetype and the FileType rule above never fires; match on path
+-- instead. The second 'spellfile' entry is what `2zg` writes to, keeping names
+-- and one-off jargon in the journal while plain `zg` still files to the dotfiles
+-- list. Words in either file count as good; the count only picks which file gets
+-- written. 'spellfile' is buffer-local, so opt_local appends for this buffer.
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  desc = 'Spell-check journal entries, which vim gives no filetype',
+  group = vim.api.nvim_create_augroup('spell-journal', { clear = true }),
+  pattern = vim.fn.expand '~/journal/*',
+  callback = function()
+    vim.opt_local.spell = true
+    vim.opt_local.spellfile:append(vim.fn.expand '~/journal/.spell.add')
+  end,
+})
+
 -- [[ Make Configuration ]]
 -- Configure :make to run linters per filetype, populating the quickfix list
 vim.api.nvim_create_augroup('make-config', { clear = true })

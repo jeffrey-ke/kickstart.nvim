@@ -25,6 +25,22 @@ local function toggle_diagnostics()
 end
 vim.keymap.set('n', '<leader>td', toggle_diagnostics, { desc = '[T]oggle [D]iagnostics' })
 
+-- Spell checking (options and the prose autocmds live in init.lua's
+-- [[ Spell checking ]] block). The .vimrc uses <Space>s for this toggle, which
+-- cannot be copied over: <Space> is mapleader here and <leader>s is telescope's
+-- [S]earch prefix, so a bare <leader>s map would stall all twelve <leader>s*
+-- keys behind 'timeoutlen'. <leader>ts joins the [T]oggle group instead.
+vim.keymap.set('n', '<leader>ts', function()
+  vim.opt_local.spell = not vim.opt_local.spell:get()
+  vim.notify('Spell ' .. (vim.opt_local.spell:get() and 'enabled' or 'disabled'), vim.log.levels.INFO)
+end, { desc = '[T]oggle [S]pell' })
+
+-- Fix the previous typo without leaving insert mode (castel.dev/post/lecture-notes-1):
+-- [s jumps back to it, 1z= takes the first suggestion, `]a returns to where you
+-- were typing. The <C-g>u breaks make the whole correction one undo step. Raises
+-- E756 when 'spell' is off -- that is what <leader>ts above is for.
+vim.keymap.set('i', '<C-l>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
+
 -- Swap ^ and $ for easier end-of-line navigation
 vim.keymap.set({ 'n', 'o', 'v' }, '^', '$')
 vim.keymap.set({ 'n', 'o', 'v' }, '$', '^')
