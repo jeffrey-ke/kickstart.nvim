@@ -125,8 +125,8 @@ end, { desc = 'Focus enclosing function (fold all others)' })
 -- vim.keymap.set('n', '<Tab>', 'za', { desc = 'Toggle fold under cursor' }) -- conflicts with <C-i> jumplist
 vim.keymap.set('n', '<S-Tab>', 'zA', { desc = 'Toggle fold under cursor (recursive)' })
 
--- Select pasted text
-vim.keymap.set('n', '<leader>p', '`[v`]', { desc = 'Select [P]asted text' })
+-- Insert a single space without entering insert mode persistently
+vim.keymap.set('n', '<leader>p', 'i<Space><Esc>', { desc = 'Insert a space' })
 
 -- Insert TODO comment on new line
 vim.keymap.set('n', '<leader>to', 'o#TODO: <Esc>', { desc = 'Add [TO]DO comment' })
