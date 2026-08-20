@@ -10,6 +10,39 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- Quickfix navigation under <leader>c, shaped like buffer motion: `cj`/`ck` step
+-- one entry (`:cnext`/`:cprevious`, count-aware), `cgg`/`cG` jump to the ends
+-- (`:cfirst`/`:clast`). Stepping off either end is an error in Vim (E553), so
+-- these wrap around instead, and an empty list says so rather than raising E42.
+local function qf_size()
+  return vim.fn.getqflist({ size = 0 }).size
+end
+
+local function qf_step(cmd, wrap)
+  return function()
+    if qf_size() == 0 then
+      vim.notify('Quickfix list is empty', vim.log.levels.WARN)
+    elseif not pcall(vim.cmd, vim.v.count1 .. cmd) then
+      vim.cmd(wrap)
+    end
+  end
+end
+
+local function qf_edge(cmd)
+  return function()
+    if qf_size() == 0 then
+      vim.notify('Quickfix list is empty', vim.log.levels.WARN)
+    else
+      vim.cmd(cmd)
+    end
+  end
+end
+
+vim.keymap.set('n', '<leader>cj', qf_step('cnext', 'cfirst'), { desc = 'Quickfix next entry' })
+vim.keymap.set('n', '<leader>ck', qf_step('cprevious', 'clast'), { desc = 'Quickfix previous entry' })
+vim.keymap.set('n', '<leader>cgg', qf_edge 'cfirst', { desc = 'Quickfix first entry' })
+vim.keymap.set('n', '<leader>cG', qf_edge 'clast', { desc = 'Quickfix last entry' })
+
 -- Diagnostics disabled by default - use :make or :Make to check errors
 -- Toggle diagnostics on/off
 local diagnostics_active = false
@@ -336,3 +369,4 @@ vim.api.nvim_create_user_command('Su', function(opts)
 end, { nargs = '+', desc = 'Substitute in quickfix files: :Su <to> or :Su <from> <to>' })
 
 require('custom.stage_commit').setup()
+require('custom.code_pointers').setup()
