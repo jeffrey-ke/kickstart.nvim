@@ -263,6 +263,19 @@ vim.o.inccommand = 'split'
 -- Show which line your cursor is on
 vim.o.cursorline = true
 
+-- Name a highlight group in every 'guicursor' mode. Stock nvim names none, and
+-- with no group nvim never emits OSC 12, so the cursor keeps whatever color the
+-- terminal draws it in and the colorscheme's `Cursor` group is dead code --
+-- verified by capturing a whole nvim startup on a pty: zero `ESC]12;`, only
+-- DECSCUSR shape changes. tmux advertises `ccolour` for a Ghostty client, so the
+-- color reaches the outer terminal (and is restored on exit).
+vim.o.guicursor = table.concat({
+  'n-v-c-sm:block-Cursor/lCursor',
+  'i-ci-ve:ver25-Cursor/lCursor',
+  'r-cr-o:hor20-Cursor/lCursor',
+  't:block-blinkon500-blinkoff500-TermCursor',
+}, ',')
+
 -- Minimal number of screen lines to keep above and below the cursor.
 vim.o.scrolloff = 2
 
@@ -390,6 +403,17 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
     vim.opt_local.spellfile:append(vim.fn.expand '~/journal/.spell.add')
   end,
 })
+
+-- [[ Quickfix Display ]]
+-- Shorten paths in the quickfix and location-list windows: cwd-relative, then
+-- `~`, then fish-style directory initials for whatever is still long
+-- (`~/.l/s/n/l/r/l/r/core/ui.lua`). Reproduces Vim's own line format in every
+-- other respect -- see lua/custom/qf_text.lua.
+-- The lambda wrapper is required: this option takes a funcref or a function
+-- *name*, and a bare `v:lua.require("...").format` parses as neither, so Vim
+-- discards it and silently falls back to the built-in format -- no error, the
+-- window just looks untouched.
+vim.o.quickfixtextfunc = '{info -> v:lua.require("custom.qf_text").format(info)}'
 
 -- [[ Make Configuration ]]
 -- Configure :make to run linters per filetype, populating the quickfix list
@@ -610,6 +634,7 @@ require('lazy').setup({
 
       -- Document existing key chains
       spec = {
+        { '<leader>c', group = 'Quickfix' },
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
@@ -689,6 +714,25 @@ require('lazy').setup({
           find_files = {
             hidden = true,
           },
+          -- Give the quickfix picker the same paths `:copen` shows, so the two
+          -- views of one list don't disagree. A function `path_display`
+          -- short-circuits Telescope's own path handling, hence the shortening
+          -- also does the cwd-relativizing (lua/custom/qf_text.lua).
+          --
+          -- Same idea for the ordering: Telescope's default
+          -- `sorting_strategy = 'descending'` grows the list upward from the
+          -- prompt, so with an empty prompt (all scores equal, insertion order
+          -- kept) quickfix entry 1 lands at the *bottom* — `:copen` read
+          -- backwards. 'ascending' puts entry 1 on the top row, and moving the
+          -- prompt up with it keeps the first entry next to where you type
+          -- instead of a rows-tall gap when the list is short.
+          quickfix = {
+            path_display = function(_, path)
+              return require('custom.qf_text').shorten(path)
+            end,
+            sorting_strategy = 'ascending',
+            layout_config = { prompt_position = 'top' },
+          },
         },
         extensions = {
           ['ui-select'] = {
@@ -712,6 +756,11 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
       vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
       vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
+      -- Fuzzy-filter the current quickfix list; <leader>sQ picks an older list
+      -- out of the ten-deep history (`:h quickfix-error-lists`), which is the
+      -- part `:copen` alone gives no way to reach.
+      vim.keymap.set('n', '<leader>sq', builtin.quickfix, { desc = '[S]earch [Q]uickfix list' })
+      vim.keymap.set('n', '<leader>sQ', builtin.quickfixhistory, { desc = '[S]earch [Q]uickfix history' })
       vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
 
       -- Slightly advanced example of overriding default behavior and theme
@@ -1140,6 +1189,12 @@ require('lazy').setup({
           -- },
         },
         opts = { enable_autosnippets = true },
+        config = function(_, opts)
+          require('luasnip').setup(opts)
+          -- Given nil paths, from_lua scans the runtimepath for `luasnippets/`
+          -- dirs, so this also picks up ours at the config root.
+          require('luasnip.loaders.from_lua').load()
+        end,
       },
       'folke/lazydev.nvim',
     },
@@ -1231,18 +1286,61 @@ require('lazy').setup({
     },
   },
 
-  { -- seoul256, true-color mode: fixed RGB values baked into the colorscheme.
-    -- Dark and light are separate colorscheme names (seoul256 / seoul256-light),
-    -- unlike solarized's single name + &background toggle.
-    'junegunn/seoul256.vim',
+  { -- catppuccin, true-color mode: flavour names double as dark/light colorschemes.
+    -- One plugin, unlike seoul256's two separate repos: catppuccin-latte is the
+    -- light flavour, catppuccin-mocha the dark one.
+    'catppuccin/nvim',
+    name = 'catppuccin',
     priority = 1000, -- Make sure to load this before all the other start plugins.
     config = function()
-      vim.g.seoul256_light_background = 256 -- lightest of the 252-256 light range
-      vim.o.background = 'light' -- default; :ToggleBackground flips it
-      vim.cmd.colorscheme 'seoul256-light'
+      require('catppuccin').setup {
+        -- Leave every cell's background to the terminal, which is what lets
+        -- tmux's inactive-pane dimming reach nvim at all: `window-style` only
+        -- recolors cells an application left at default fg/bg. Measured with a
+        -- pty capture of an inactive pane -- opaque `Normal` forwarded nvim's
+        -- own bg and none of tmux's dim colors; `Normal bg=NONE` emitted them
+        -- throughout. Floats stay opaque (`float.transparent` defaults false),
+        -- so hover and completion windows still read as raised panels.
+        transparent_background = true,
+        custom_highlights = function(colors)
+          -- Light vs dark is read off the palette handed in, not off
+          -- &background: catppuccin compiles every flavour in one pass, so a
+          -- &background test would bake one answer into both flavours' cached
+          -- files. The red channel of `base` separates them cleanly.
+          local dark = tonumber(colors.base:sub(2, 3), 16) < 0x80
+          return {
+            -- Catppuccin's CursorLine is a 64% blend of surface0 back toward
+            -- the base: 6/255 per channel from `Normal` in latte, so the line
+            -- is enabled but invisible. An unblended surface is the contrast,
+            -- and with a transparent background it is the only thing marking
+            -- the cursor's row.
+            CursorLine = { bg = dark and colors.surface1 or colors.surface0 },
+            CursorLineNr = { fg = colors.lavender, bold = true },
+            -- The terminal-cursor look: the block takes the foreground color
+            -- and the character under it the background, which reads at full
+            -- contrast in both flavours. Catppuccin ships rosewater here --
+            -- in latte a pale salmon block under off-white text, 2.6:1.
+            Cursor = { fg = colors.base, bg = colors.text },
+            lCursor = { fg = colors.base, bg = colors.text },
+            TermCursor = { fg = colors.base, bg = colors.text },
+          }
+        end,
+      }
+      -- Deliberately no `vim.o.background = ...` here, and deliberately the
+      -- flavour-agnostic `catppuccin` colorscheme rather than a flavour name:
+      -- nvim detects the terminal's background over OSC 11 at startup, but only
+      -- honors the reply while 'background' has never been assigned. Measured in
+      -- a pane whose OSC 11 answer is light -- `--cmd 'set background=dark'`
+      -- keeps nvim dark for the session, the same pane with 'background'
+      -- untouched flips to light. `:colorscheme catppuccin-latte` counts as such
+      -- an assignment (its compiled chunk sets 'background' whenever it is
+      -- called with a flavour), whereas plain `catppuccin` under the default
+      -- `flavour = 'auto'` reads &background and leaves it alone. So the terminal
+      -- decides, and :ToggleBackground still overrides by hand.
+      vim.cmd.colorscheme 'catppuccin'
       vim.o.termguicolors = true -- defensive re-assert in case a later plugin flips it off
 
-      -- Reload seoul256 whenever &background changes: absorbs nvim's async
+      -- Reload catppuccin whenever &background changes: absorbs nvim's async
       -- OSC-11 startup detection and drives :ToggleBackground. nested=true is
       -- required so the ColorScheme autocmds (statusline etc.) re-fire.
       local reloading = false
@@ -1254,7 +1352,7 @@ require('lazy').setup({
             return
           end
           reloading = true
-          vim.cmd.colorscheme(vim.o.background == 'dark' and 'seoul256' or 'seoul256-light')
+          vim.cmd.colorscheme 'catppuccin' -- flavour follows &background
           reloading = false
         end,
       })
@@ -1333,6 +1431,12 @@ require('lazy').setup({
     -- resolutions are migrating to `main` or following upstream kickstart, which
     -- has since dropped lazy.nvim for `vim.pack` entirely.
     branch = 'master',
+    -- One concrete casualty of that 0.12 mismatch, repaired before the plugin's
+    -- query_predicates module registers anything: master still asks core for the
+    -- `all = false` (one-node-per-capture) handler signature that 0.12 dropped.
+    init = function()
+      require 'custom.ts_predicate_compat'()
+    end,
     main = 'nvim-treesitter.configs', -- Sets main module to use for opts
     -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
     opts = {
