@@ -404,6 +404,12 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   end,
 })
 
+-- gf follows SilverBullet [[wikilinks]] inside the ~/worklog space. Page finding
+-- and grep need no help: `sbj` (machines/jke-laptop.sh) opens nvim with cwd set
+-- to the space, so <leader>sf and <leader>sg above already search it. Inert on a
+-- machine with no worklog -- the autocmd's path test never matches.
+require('custom.sbnav').setup()
+
 -- [[ Quickfix Display ]]
 -- Shorten paths in the quickfix and location-list windows: cwd-relative, then
 -- `~`, then fish-style directory initials for whatever is still long
