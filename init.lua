@@ -246,6 +246,16 @@ vim.o.timeoutlen = 300
 vim.o.splitright = true
 vim.o.splitbelow = true
 
+-- Indent with spaces, 4 wide, mirroring ~/dotfiles/.vimrc. Nvim's own defaults are
+-- noexpandtab/ts=8, and nothing here overrode them, so every buffer got hard tabs.
+-- This is only the fallback: guess-indent.nvim (in the plugin list below) re-detects
+-- expandtab/shiftwidth per buffer on read, so an existing file keeps whatever it
+-- already uses -- 2 spaces in Google-style C++ -- and only new files land here.
+vim.o.expandtab = true
+vim.o.shiftwidth = 4
+vim.o.tabstop = 4
+vim.o.softtabstop = 4
+
 -- Sets how neovim will display certain whitespace characters in the editor.
 --  See `:help 'list'`
 --  and `:help 'listchars'`
@@ -297,6 +307,13 @@ vim.opt.foldlevelstart = 99
 -- wrapping" — see :help 'foldtext'. This replaces a hand-rolled foldtext function
 -- that walked the treesitter highlights query to emit {text, group} chunks itself.
 vim.opt.foldtext = ''
+-- Announce folds in the gutter. Without this a closed fold is only marked by the
+-- '·' fill that nvim's default 'fillchars' pads the line with, which is easy to
+-- read as an empty buffer. 'auto:3' spends no columns until the buffer actually
+-- has folds, then grows to 3 (one per nesting level). The chevrons replace the
+-- defaults ('−' open, '+' closed), which read like diff markers here.
+vim.opt.foldcolumn = 'auto:3'
+vim.opt.fillchars:append { foldopen = '▾', foldclose = '▸', foldsep = ' ' }
 
 -- Soft wrap, breaking at word boundaries rather than mid-word.
 vim.opt.wrap = true
@@ -348,10 +365,12 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
 -- read the same repo-tracked word list, so a `zg` in either one travels between
 -- machines.
 
--- 'en_us' is a *region* inside the bundled en.utf-8.spl (nvim ships it in
--- $VIMRUNTIME/spell/), so spellfile.vim never prompts to download anything.
--- British spellings are then flagged as SpellRare rather than SpellBad.
-vim.o.spelllang = 'en_us'
+-- 'en' is the bundled en.utf-8.spl with no region narrowing (nvim ships the file
+-- in $VIMRUNTIME/spell/, so spellfile.vim never prompts to download anything).
+-- Every English region counts as good, which is the point: under the previous
+-- 'en_us' a British spelling like "behaviour" drew a SpellLocal undercurl, and
+-- zg is the wrong fix for a word that is already in the dictionary.
+vim.o.spelllang = 'en'
 
 -- Words added with zg go in the dotfiles repo so they are version-controlled.
 -- nvim's default is the first 'runtimepath' entry -- i.e. this submodule, whose
@@ -364,6 +383,28 @@ vim.opt.spellfile = vim.fn.expand '~/dotfiles/spell/en.utf-8.add'
 -- as one long typo.
 vim.opt.spelloptions:append 'camel'
 
+-- Kill the SpellCap (yellow) undercurl. 'spellcapcheck' is the regex for "a
+-- sentence ended here", so emptying it stops the capitalisation check being run
+-- at all -- better than hiding the highlight, since ]s no longer stops on a
+-- lowercase list item or a line starting with a variable name either.
+vim.o.spellcapcheck = ''
+
+-- Kill the SpellRare (green) undercurl. There is no option to switch the check
+-- itself off, so the highlight is what goes; ]s still visits rare words, which
+-- is fine because there are very few of them. Inside a ColorScheme autocmd, not
+-- a bare call: :colorscheme runs :hi clear first, so a one-shot override would
+-- be undone by the first :ToggleBackground. Applied once here too, for the
+-- colorscheme that has already loaded by this point.
+local function clear_spell_rare()
+  vim.api.nvim_set_hl(0, 'SpellRare', {})
+end
+clear_spell_rare()
+vim.api.nvim_create_autocmd('ColorScheme', {
+  desc = 'Keep SpellRare unhighlighted across colorscheme switches',
+  group = vim.api.nvim_create_augroup('spell-no-rare', { clear = true }),
+  callback = clear_spell_rare,
+})
+
 -- The .add list is plain text, but vim only ever reads the compiled .add.spl
 -- beside it, and *.spl is gitignored (spell/.gitignore) as a binary artifact.
 -- `zg` recompiles on add, but a fresh clone has no .add.spl at all, and a pull
@@ -375,6 +416,41 @@ vim.opt.spelloptions:append 'camel'
 local spell_add = vim.fn.expand '~/dotfiles/spell/en.utf-8.add'
 if vim.fn.filereadable(spell_add) == 1 and vim.fn.getftime(spell_add) > vim.fn.getftime(spell_add .. '.spl') then
   pcall(vim.cmd, 'silent! mkspell! ' .. vim.fn.fnameescape(spell_add))
+end
+
+-- Two curated wordlists ride alongside 'en' as extra 'spelllang' entries: tech
+-- (programming, ML, robotics, infra) and math (analysis, algebra, probability,
+-- optimization, geometry). They exist because zg-ing jargon one word at a time
+-- does not converge. Every word in them was filtered against the bundled en
+-- dictionary and kept only where en lacked it, so they are small. They are
+-- read-only good words: zg still files to en.utf-8.add, which keeps the personal
+-- list personal and readable.
+--
+-- Same staleness problem as the .add above, for the same reason -- only the
+-- compiled .spl is ever read, and *.spl is gitignored -- so the same fix. Two
+-- differences: a wordlist compiles to a separate output rather than in place,
+-- and that output has to land in a 'spell' directory on 'runtimepath' or
+-- 'spelllang' cannot resolve the name at all. stdpath('data')/site is the
+-- writable rtp entry meant for this, and keeps a generated binary out of git.
+local spell_out = vim.fn.stdpath 'data' .. '/site/spell'
+for _, list in ipairs { 'tech', 'math' } do
+  local words = vim.fn.expand('~/dotfiles/spell/' .. list .. '.words')
+  local spl = spell_out .. '/' .. list .. '.utf-8.spl'
+  if vim.fn.filereadable(words) == 1 then
+    if vim.fn.getftime(words) > vim.fn.getftime(spl) then
+      vim.fn.mkdir(spell_out, 'p')
+      -- :mkspell adds the .<encoding>.spl suffix to the output name it is given,
+      -- and is chatty enough about node counts to need silencing at startup.
+      pcall(function()
+        vim.cmd.mkspell { args = { spell_out .. '/' .. list, words }, bang = true, mods = { silent = true } }
+      end)
+    end
+    -- Naming a language whose .spl is missing makes every prose buffer open with
+    -- an E484, so only claim it once a compile has really produced one.
+    if vim.fn.filereadable(spl) == 1 then
+      vim.opt.spelllang:append(list)
+    end
+  end
 end
 
 -- Prose filetypes only -- a global 'spell' underlines every identifier in code.
@@ -535,7 +611,8 @@ rtp:prepend(lazypath)
 -- NOTE: Here is where you install your plugins.
 require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
-  'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
+  { 'NMAC427/guess-indent.nvim', opts = {} }, -- Detect tabstop and shiftwidth automatically
+
   'tpope/vim-fugitive',
   'tpope/vim-eunuch',
 
@@ -644,6 +721,8 @@ require('lazy').setup({
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
+        { '<leader>n', group = 'A[n]notations (haunt)' },
+        { '<leader>H', group = '[H]ighlights (save/load)' },
       },
     },
   },
@@ -943,19 +1022,40 @@ require('lazy').setup({
 
       -- Diagnostic Config
       -- See :help vim.diagnostic.Opts
+      --
+      -- Diagnostics are the only LSP capability the server *pushes*; definitions and
+      -- references are pulled on demand. Project-scoped servers push badly -- clangd and
+      -- pyright flag unresolved imports and half-written code because they want a build
+      -- graph the buffer may not have yet -- so rendering is gated to filetypes where a
+      -- pushed diagnostic is trustworthy. shellcheck qualifies: it parses one
+      -- self-contained file, no build graph, nothing to resolve. Diagnostics stay
+      -- *enabled* everywhere, so <leader>q still pulls them into the loclist on demand;
+      -- this hides the unsolicited paint, not the information. <leader>td overrides.
+      --
+      -- signs/underline/virtual_text each accept fun(namespace, bufnr) and use the return
+      -- value verbatim, so returning false disables that channel for that buffer.
+      local function when_trusted(opts)
+        return function(_, bufnr)
+          local ft = vim.bo[bufnr].filetype
+          return (vim.g.diagnostic_render_all or ft == 'sh' or ft == 'bash') and opts or false
+        end
+      end
+
       vim.diagnostic.config {
         severity_sort = true,
+        update_in_insert = false,
+        -- Pull-based: nothing appears unless asked for, so it stays on everywhere.
         float = { border = 'rounded', source = 'if_many' },
-        underline = { severity = vim.diagnostic.severity.ERROR },
-        signs = vim.g.have_nerd_font and {
+        underline = when_trusted { severity = vim.diagnostic.severity.ERROR },
+        signs = when_trusted(vim.g.have_nerd_font and {
           text = {
             [vim.diagnostic.severity.ERROR] = '󰅚 ',
             [vim.diagnostic.severity.WARN] = '󰀪 ',
             [vim.diagnostic.severity.INFO] = '󰋽 ',
             [vim.diagnostic.severity.HINT] = '󰌶 ',
           },
-        } or {},
-        virtual_text = {
+        } or {}),
+        virtual_text = when_trusted {
           source = 'if_many',
           spacing = 2,
           format = function(diagnostic)
@@ -1258,7 +1358,33 @@ require('lazy').setup({
           -- buffer is boosted to 10 below, so buffer-word matches outrank
           -- snippet triggers (e.g. typing "item" would rank the literal word
           -- "item" from elsewhere in the buffer above the itemize snippet).
-          snippets = { score_offset = 15 },
+          snippets = {
+            score_offset = 15,
+            -- Put the snippet's `desc` in the label's description column instead
+            -- of only in the `<c-space>` docs window. Load-bearing for the
+            -- ~/.snippet_aliases snippets (luasnippets/all.lua): their whole
+            -- point is that the expansion is a string you cannot spell, so the
+            -- trigger alone tells you nothing about what you are accepting.
+            -- Global rather than per-snippet because blink always labels an item
+            -- with `trig` and `desc` is the only other field it will read.
+            opts = { use_label_description = true },
+            -- The flag being global has a cost: LuaSnip fills `dscr` with the
+            -- trigger when a snippet sets no desc, so turning it on also prints
+            -- the trigger a second time for every snippet that never asked for a
+            -- description (16 of the 21 in markdown/sh/tex/python). Drop the
+            -- column exactly where it is redundant, keeping it for the few that
+            -- set a real desc and for the ~/.snippet_aliases expansions.
+            -- Safe to mutate: the source hands back shallow copies, so clearing
+            -- the field here does not reach its per-filetype item cache.
+            transform_items = function(_, items)
+              for _, item in ipairs(items) do
+                if item.labelDetails and item.labelDetails.description == item.label then
+                  item.labelDetails = nil
+                end
+              end
+              return items
+            end,
+          },
           buffer = {
             score_offset = 10,
             opts = {
@@ -1322,6 +1448,14 @@ require('lazy').setup({
             -- the cursor's row.
             CursorLine = { bg = dark and colors.surface1 or colors.surface0 },
             CursorLineNr = { fg = colors.lavender, bold = true },
+            -- Match the fold gutter to the fold fill. Catppuccin paints Folded
+            -- -- the '·' padding 'foldtext' leaves on a closed line -- in
+            -- `blue`, but leaves FoldColumn on overlay0, the same dim grey as
+            -- NonText: measured off a rendered pane, #89b4fa dots sitting next
+            -- to a #6c7086 chevron. CursorLineFold needs the same treatment or
+            -- the marker on the cursor's own row stays grey.
+            FoldColumn = { fg = colors.blue },
+            CursorLineFold = { fg = colors.blue },
             -- The terminal-cursor look: the block takes the foreground color
             -- and the character under it the background, which reads at full
             -- contrast in both flavours. Catppuccin ships rosewater here --
@@ -1546,6 +1680,23 @@ local function toggle_background()
 end
 vim.api.nvim_create_user_command('ToggleBackground', toggle_background, { desc = 'Flip light/dark to match terminal theme' })
 vim.keymap.set('n', '<leader>tb', toggle_background, { desc = '[T]oggle [B]ackground (light/dark)' })
+
+-- Re-read the luasnippets/*.lua files without restarting nvim. LuaSnip only
+-- watches them through a BufWritePost autocmd (its libuv fs-event provider is
+-- off by default), so edits made outside this instance -- another nvim, or an
+-- agent writing the file -- stay invisible until the watchers are notified.
+-- reload_file() re-reads one file and swaps its snippets out (they're keyed
+-- per ft+path); re-running the loader would instead build a second collection
+-- with its own duplicate set of file watchers.
+local function reload_snippets()
+  local files = vim.api.nvim_get_runtime_file('luasnippets/*.lua', true)
+  for _, path in ipairs(files) do
+    require('luasnip.loaders').reload_file(path)
+  end
+  vim.notify(('Reloaded %d snippet file(s)'):format(#files), vim.log.levels.INFO)
+end
+vim.api.nvim_create_user_command('ReloadSnippets', reload_snippets, { desc = 'Re-read luasnippets/*.lua from disk' })
+vim.keymap.set('n', '<leader>rs', reload_snippets, { desc = '[R]eload [S]nippets' })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
