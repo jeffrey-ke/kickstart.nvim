@@ -7,6 +7,23 @@ vim.cmd [[cnoreabbrev vsb vert sb]]
 --  See `:help hlsearch`
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
+-- `*` highlights every match of the word under the cursor but also jumps to the
+-- next one. This is the same highlight without the jump: the pattern is written
+-- straight into the `/` register instead of being searched for, so the cursor
+-- stays put and `n`/`N`/`:%s//new/g` still pick it up. <Esc> above clears it.
+-- Word chars get `\<...\>` boundaries like `*` does; anything else (`+++`, `->`)
+-- is matched literally with `\V`, where `\<` would not apply.
+vim.keymap.set('n', '<leader>*', function()
+  local word = vim.fn.expand '<cword>'
+  if word == '' then
+    return
+  end
+  local pattern = word:match '^[%w_]+$' and ('\\<' .. word .. '\\>') or ('\\V' .. vim.fn.escape(word, '\\'))
+  vim.fn.setreg('/', pattern)
+  vim.fn.histadd('search', pattern)
+  vim.opt.hlsearch = true
+end, { desc = 'Highlight all matches of word under cursor (no jump)' })
+
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
@@ -43,20 +60,17 @@ vim.keymap.set('n', '<leader>ck', qf_step('cprevious', 'clast'), { desc = 'Quick
 vim.keymap.set('n', '<leader>cgg', qf_edge 'cfirst', { desc = 'Quickfix first entry' })
 vim.keymap.set('n', '<leader>cG', qf_edge 'clast', { desc = 'Quickfix last entry' })
 
--- Diagnostics disabled by default - use :make or :Make to check errors
--- Toggle diagnostics on/off
-local diagnostics_active = false
-vim.diagnostic.enable(false)
-local function toggle_diagnostics()
-  diagnostics_active = not diagnostics_active
-  vim.diagnostic.enable(diagnostics_active)
-  if diagnostics_active then
-    vim.notify('Diagnostics enabled', vim.log.levels.INFO)
-  else
-    vim.notify('Diagnostics disabled', vim.log.levels.INFO)
-  end
-end
-vim.keymap.set('n', '<leader>td', toggle_diagnostics, { desc = '[T]oggle [D]iagnostics' })
+-- Force diagnostic rendering on for every filetype. init.lua's [[ Diagnostic Config ]]
+-- paints only shell buffers by default; that replaced a blanket vim.diagnostic.enable(false),
+-- so diagnostics are computed everywhere now and <leader>q works without toggling first.
+-- A bare vim.diagnostic.show() hides then re-shows every cached buffer, which is what makes
+-- the flip reach windows already open rather than only the next buffer entered.
+vim.g.diagnostic_render_all = false
+vim.keymap.set('n', '<leader>td', function()
+  vim.g.diagnostic_render_all = not vim.g.diagnostic_render_all
+  vim.diagnostic.show()
+  vim.notify('Diagnostic rendering: ' .. (vim.g.diagnostic_render_all and 'all filetypes' or 'shell only'), vim.log.levels.INFO)
+end, { desc = '[T]oggle [D]iagnostic rendering' })
 
 -- Spell checking (options and the prose autocmds live in init.lua's
 -- [[ Spell checking ]] block). The .vimrc uses <Space>s for this toggle, which
@@ -119,14 +133,89 @@ vim.keymap.set('n', 'zf', function()
   fold_at_enclosing_function 'za'
 end, { desc = 'Toggle enclosing function fold' })
 
-vim.keymap.set('n', 'zF', function()
-  fold_at_enclosing_function 'zMzO'
-end, { desc = 'Focus enclosing function (fold all others)' })
+-- z1..z9 fold the whole buffer to a depth: z1 leaves only level-1 fold starts
+-- visible (top-level markdown headings, module-level def/class), z2 one level
+-- deeper, and so on. 'foldlevel' is the count of levels left *open*, so showing
+-- N levels of headers means closing everything at level N -- hence N - 1.
+-- These shadow built-in z{height}<CR> (resize window to {height} lines), which
+-- becomes unreachable: 'z1' matches and fires before you can type the digits.
+for n = 1, 9 do
+  vim.keymap.set('n', 'z' .. n, function()
+    vim.wo.foldlevel = n - 1
+  end, { desc = ('Fold to level %d'):format(n) })
+end
+
+-- The chain of folds enclosing the cursor, outermost first, as {start, stop}
+-- line pairs. No fold API reports this directly, so it is read the way vim
+-- exposes it: with everything closed, foldclosed('.')/foldclosedend('.') give
+-- the outermost fold over the cursor, and each zo (which opens exactly one
+-- level) peels the next one into view. Leaves that whole chain open, the cursor
+-- line visible, and every fold off the chain closed.
+local function open_fold_chain()
+  vim.cmd 'normal! zM'
+  local chain = {}
+  for _ = 1, vim.fn.foldlevel(vim.fn.line '.') do
+    local line = vim.fn.line '.'
+    local start = vim.fn.foldclosed(line)
+    if start == -1 then
+      break
+    end
+    table.insert(chain, { start = start, stop = vim.fn.foldclosedend(line) })
+    vim.cmd 'normal! zo'
+  end
+  return chain
+end
+
+-- Where the last zF left off, so repeated presses widen instead of repeating.
+local focus = { bufnr = nil, start = nil, depth = nil, press = 0 }
+
+-- Focus the fold under the cursor; widen on repeat. Press 1 folds the whole
+-- buffer except the chain down to the innermost enclosing fold, whose own
+-- children stay closed -- the tightest view that still shows this fold's body.
+-- Press k also opens the (k-1)'th ancestor recursively, so each press brings
+-- more surrounding context (and the siblings inside that ancestor) into view.
+-- Press depth+1 wraps back to the tightest view. Walking to a fold elsewhere
+-- resets the cycle, since `focus` no longer matches the chain found here.
+local function fold_focus()
+  if vim.fn.foldlevel(vim.fn.line '.') == 0 then
+    vim.notify('No fold here', vim.log.levels.INFO)
+    return
+  end
+  local view = vim.fn.winsaveview()
+  local chain = open_fold_chain()
+  local depth = #chain
+  if depth == 0 then
+    vim.fn.winrestview(view)
+    vim.notify('No fold here', vim.log.levels.INFO)
+    return
+  end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  local innermost = chain[depth].start
+  local continuing = focus.bufnr == bufnr and focus.start == innermost and focus.depth == depth
+  local press = continuing and (focus.press % depth) + 1 or 1
+  focus = { bufnr = bufnr, start = innermost, depth = depth, press = press }
+
+  if press > 1 then
+    -- Counting inward from the outermost: press 2 is the innermost's parent.
+    -- ':range foldopen!' and not zO: zO opens the folds *containing* the cursor
+    -- recursively, which the chain walk above already did. Widening means
+    -- opening everything nested inside the ancestor, siblings included, and a
+    -- ranged :foldopen! is what does that.
+    local ancestor = chain[depth - press + 1]
+    vim.cmd(('%d,%dfoldopen!'):format(ancestor.start, ancestor.stop))
+  end
+  vim.fn.winrestview(view)
+  -- Not notify(): the cycle position is worth seeing, not worth a message log.
+  vim.api.nvim_echo({ { ('fold focus %d/%d'):format(press, depth), 'Comment' } }, false, {})
+end
+
+vim.keymap.set('n', 'zF', fold_focus, { desc = 'Focus fold under cursor (repeat to widen)' })
 -- vim.keymap.set('n', '<Tab>', 'za', { desc = 'Toggle fold under cursor' }) -- conflicts with <C-i> jumplist
 vim.keymap.set('n', '<S-Tab>', 'zA', { desc = 'Toggle fold under cursor (recursive)' })
 
--- Insert a single space without entering insert mode persistently
-vim.keymap.set('n', '<leader>p', 'i<Space><Esc>', { desc = 'Insert a space' })
+-- Append a space after the cursor without entering insert mode persistently
+vim.keymap.set('n', '<leader>p', 'a<Space><Esc>', { desc = 'Append a space after cursor' })
 
 -- Insert TODO comment on new line
 vim.keymap.set('n', '<leader>to', 'o#TODO: <Esc>', { desc = 'Add [TO]DO comment' })
@@ -184,6 +273,109 @@ vim.keymap.set('v', '<leader>yr', function()
   vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
 end, { desc = 'Yank Claude Code file range reference (@file#Lstart-end)' })
 
+-- A commit-pinned web link to the line(s) under the cursor -- the shareable
+-- cousin of <leader>yr, for anyone who is not looking at this checkout.
+-- Pinning to the commit rather than the branch is the whole point: the link
+-- keeps meaning the same line after the branch moves on.
+local function git_permalink(first_line, last_line)
+  local path = vim.fn.expand '%:p'
+  if path == '' then
+    return nil, 'No file for this buffer'
+  end
+  local dir = vim.fn.fnamemodify(path, ':h')
+
+  -- nil on nonzero exit, so every step below can be checked the same way.
+  local function git(...)
+    local out = vim.fn.systemlist { 'git', '-C', dir, ... }
+    if vim.v.shell_error ~= 0 then
+      return nil
+    end
+    return out
+  end
+
+  local head = git('rev-parse', 'HEAD')
+  if not head then
+    return nil, 'Not inside a git repository: ' .. dir
+  end
+  local sha = head[1]
+
+  local tracked = git('ls-files', '--full-name', '--error-unmatch', '--', path)
+  if not tracked or not tracked[1] then
+    return nil, 'Not tracked by git: ' .. path
+  end
+  local relpath = tracked[1]
+
+  -- Does the remote have this commit? Asked of the local remote-tracking refs
+  -- rather than the network, so it is wrong only when the push happened in
+  -- another checkout and this one has not fetched since.
+  --
+  -- The upstream branch answers it in milliseconds; the exhaustive scan over
+  -- every refs/remotes/* takes ~1s in a repo the size of Nuro, so it is a
+  -- fallback for detached HEADs and branches with no upstream, not the norm.
+  local on_remote = git('merge-base', '--is-ancestor', sha, '@{upstream}') ~= nil
+  if not on_remote then
+    local containing = git('branch', '--remotes', '--contains', sha)
+    on_remote = containing ~= nil and #containing > 0
+  end
+  if not on_remote then
+    return nil, ('Commit %s is on no remote branch -- push (or fetch) first'):format(sha:sub(1, 12))
+  end
+
+  local origin = git('remote', 'get-url', 'origin')
+  if not origin then
+    return nil, 'No `origin` remote to build a URL from'
+  end
+  -- scp-style git@host:owner/repo.git, else a ssh:// or https:// URL -- whose
+  -- authority can carry a user@ and a :port that have no place in a web link.
+  local host, repo = origin[1]:match '^[%w._-]+@([^:/]+):(.+)$'
+  if not host then
+    local authority
+    authority, repo = origin[1]:match '^%a+://([^/]+)/(.+)$'
+    if authority then
+      host = authority:gsub('^[^@]*@', ''):gsub(':%d+$', '')
+    end
+  end
+  if not host then
+    return nil, 'Cannot parse origin URL: ' .. origin[1]
+  end
+  repo = repo:gsub('%.git$', '')
+
+  local anchor = first_line == last_line and ('#L%d'):format(first_line) or ('#L%d-L%d'):format(first_line, last_line)
+  local url = ('https://%s/%s/blob/%s/%s%s'):format(host, repo, sha, relpath, anchor)
+
+  -- Unsaved or uncommitted edits shift line numbers away from what the commit
+  -- holds, so the link is still valid but points somewhere else. Worth saying.
+  local stale = vim.bo.modified or git('diff', '--quiet', 'HEAD', '--', path) == nil
+  return url, nil, stale
+end
+
+local function yank_git_permalink(first_line, last_line)
+  local url, err, stale = git_permalink(first_line, last_line)
+  if not url then
+    vim.notify(err, vim.log.levels.ERROR)
+    return
+  end
+  vim.fn.setreg('+', url)
+  if stale then
+    vim.notify('Copied (buffer differs from HEAD, lines may not match):\n' .. url, vim.log.levels.WARN)
+    return
+  end
+  vim.notify('Copied: ' .. url, vim.log.levels.INFO)
+end
+
+vim.keymap.set('n', '<leader>yg', function()
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  yank_git_permalink(line, line)
+end, { desc = 'Yank [G]it permalink to this line' })
+
+vim.keymap.set('v', '<leader>yg', function()
+  local start_line, end_line = vim.fn.line 'v', vim.fn.line '.'
+  if start_line > end_line then
+    start_line, end_line = end_line, start_line
+  end
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+  yank_git_permalink(start_line, end_line)
+end, { desc = 'Yank [G]it permalink to this line range' })
 vim.keymap.set('n', '<leader>yp', function()
   local path = vim.fn.expand '%:p'
   if path == '' then
@@ -368,5 +560,65 @@ vim.api.nvim_create_user_command('Su', function(opts)
   vim.notify(string.format('Substituted "%s" -> "%s" in %d file(s)', from, to, file_count), vim.log.levels.INFO)
 end, { nargs = '+', desc = 'Substitute in quickfix files: :Su <to> or :Su <from> <to>' })
 
+-- Toggle markdown checkboxes over the cursor line, or over the visual range.
+--
+-- `line('v')` is the other end of the Visual area in visual mode and the cursor
+-- line outside it, so one expression covers both modes and the range never has
+-- to be reconstructed from the '< '> marks (which only update on leaving
+-- visual, and so would lag a press behind).
+--
+-- Each line flips independently: a mixed selection ends up inverted rather than
+-- normalised to all-checked. Nothing propagates to parents or children -- that
+-- was checkmate.nvim's smart_toggle, and it went with the plugin.
+--
+-- The pattern accepts any of the three bullet characters and either case of x,
+-- but requires the marker to be the first thing on the line, so a `[x]` written
+-- inline in prose is left alone. One set_lines call for the whole range keeps
+-- it to a single undo step.
+local function toggle_checkbox()
+  local first, last = vim.fn.line 'v', vim.fn.line '.'
+  if first > last then
+    first, last = last, first
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(0, first - 1, last, false)
+  local found = false
+  for idx, line in ipairs(lines) do
+    local head, state, tail = line:match '^(%s*[-*+]%s+%[)([ xX])(%].*)$'
+    if head then
+      lines[idx] = head .. (state == ' ' and 'x' or ' ') .. tail
+      found = true
+    end
+  end
+
+  if not found then
+    vim.notify('no markdown checkbox here', vim.log.levels.WARN)
+  else
+    vim.api.nvim_buf_set_lines(0, first - 1, last, false, lines)
+  end
+
+  -- Leave visual mode either way: the selection's highlight would otherwise
+  -- survive the edit and suggest the range is still live.
+  if vim.fn.mode():match '[vV\22]' then
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+  end
+end
+
+-- Buffer-local, in the same `<leader>m` markdown namespace as md_table.lua's
+-- `<leader>mc`. Its own augroup rather than md_table's, since checkboxes are
+-- nothing to do with tables.
+vim.api.nvim_create_autocmd('FileType', {
+  desc = 'Markdown checkbox toggle',
+  group = vim.api.nvim_create_augroup('md_checkbox', { clear = true }),
+  pattern = 'markdown',
+  callback = function()
+    vim.keymap.set({ 'n', 'x' }, '<leader>mx', toggle_checkbox, {
+      buffer = true,
+      desc = '[M]arkdown: toggle checkbo[x]',
+    })
+  end,
+})
+
 require('custom.stage_commit').setup()
 require('custom.code_pointers').setup()
+require('custom.md_table').setup()
