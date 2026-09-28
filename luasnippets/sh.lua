@@ -2,6 +2,7 @@ local ls = require 'luasnip'
 local s = ls.snippet
 local t = ls.text_node
 local i = ls.insert_node
+local c = ls.choice_node
 local d = ls.dynamic_node
 local sn = ls.snippet_node
 local fmt = require('luasnip.extras.fmt').fmt
@@ -40,6 +41,21 @@ local function brace_nodes(_, snip)
   return sn(nil, nodes)
 end
 
+-- Default for `bft`'s init stop: the current release's single model, read at
+-- each expansion from the metadata file every release PR rewrites, so it
+-- tracks whatever is checked out. Rooted at nvim's cwd rather than the buffer,
+-- because under readline's `v` the buffer lives in /tmp and only the cwd is
+-- the shell's. Outside the repo the stop falls back to a label, which fails
+-- loudly as a gs:// path instead of launching from a stale release.
+local function release_single_path()
+  local root = vim.fs.root(vim.fn.getcwd(), '.git')
+  local meta = root and root .. '/onboard/models/joint_ilp_mh/model_release_metadata.json'
+  if not (meta and vim.uv.fs_stat(meta)) then
+    return sn(nil, i(1, 'init model dir (model_release_metadata.json not found)'))
+  end
+  return sn(nil, i(1, vim.json.decode(table.concat(vim.fn.readfile(meta), '\n')).single_path))
+end
+
 local snippets = {
   -- `bce`: submit a Bates core-eval comparison job. The three tab stops are
   -- the branch commit, the base prod tag, and the eval config; each carries
@@ -58,6 +74,52 @@ bazel run -c opt //behavior/core_eval/bates/scripts:submit_core_eval_comparison_
 --config_name {} \
 --post_processors_names DataFrameBinaryProcessor]],
       { i(1, 'HEAD'), i(2, 'origin/prod/20260815'), i(3, 'bce_full') }
+    )
+  ),
+  -- `btrain`: launch a full cloud training run. The `--` gflags have to come
+  -- before the bare `key=value` hydra overrides: launcher.py hands argv[1:] to
+  -- hydra untouched and asserts every one of them splits on `=`, so a `--flag`
+  -- trailing the overrides aborts the launch (launcher.py:56-58).
+  -- Both stops carry the value used most often, so tabbing through accepts the
+  -- BFM config; `email=jke` is enough because sanitize_corp_email appends the
+  -- domain (utils/py/email_address.py:11). `tag` is the stop that has to be
+  -- typed -- left empty the launcher names the run after the current branch
+  -- rather than failing (tool/workflow/workflow_launcher_util.py:294).
+  -- No `wandb_project=`: base/train_eval.yaml:11 already defaults it to null
+  -- and only the rlms stages interpolate it, and passing it empty would set an
+  -- empty string, not restore that null. Name a project only to split runs out
+  -- of the shared behavior_training one.
+  -- Expect prompts (BCE, base job, prediction eval): train_eval_bfm.yaml
+  -- enables those tasks and launcher.sh asks whenever stdin is a terminal.
+  -- Passing `enabled_tasks=` or `use_base_commit=` here answers them up front.
+  s(
+    'btrain',
+    fmt(
+      [[
+learning/behavior/workflow/launcher.sh \
+--model=behavior_training \
+--config_path={} \
+email=jke \
+tag={}]],
+      { i(1, 'train_eval/train_eval_bfm.yaml'), i(2, 'tag') }
+    )
+  ),
+  -- `bft`: launch a finetune-only run from an existing model, skipping
+  -- pretrain. Same launcher and override rules as `btrain` above. The init
+  -- stop is prefilled by release_single_path(); the launcher passes it through
+  -- unchecked, so a bad path only fails once train_bfm_finetune_tensorcraft
+  -- loads it.
+  s(
+    'bft',
+    fmt(
+      [[
+learning/behavior/workflow/launcher.sh \
+--model=behavior_training \
+--config_path=train_eval/train_eval_bfm_finetune.yaml \
+email=jke \
+tag={} \
+train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={}]],
+      { i(1, 'tag'), d(2, release_single_path, {}) }
     )
   ),
   -- `simtest`: submit a unified-job simtest. Unified jobs take a scene set plus
@@ -136,10 +198,27 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
   -- provider, say -- is a different code path (input.c returns early when
   -- wp == NULL) and stays broken until tmux 3.7, which Ubuntu 24.04 does not
   -- package. This command path does not depend on that fix.
+  --
+  -- Stops 1 and 2 are free text and carry their hint in the placeholder. Stops
+  -- 3, 4 and 5 (blocking / priority / tier) are choice nodes instead, because
+  -- their whole domain is three words or fewer: <C-j> / <C-k> cycles the
+  -- options on those three fields (init.lua, next to <leader>rs), so the
+  -- enumeration lives in the cycle rather than in placeholder text you would
+  -- then have to delete before pasting. <C-u> lists them in a picker.
+  --
+  -- Which is only discoverable if it says so where you can see it, so the
+  -- first emitted line is a `#` comment naming the cycle keys -- a comment
+  -- here in the Lua is read when editing the snippet, never when using it.
+  -- It costs nothing downstream: only printf's output reaches the clipboard,
+  -- so the comment cannot land in a sheet cell, and bash ignores it whether
+  -- the expansion is run as a script or handed back by readline's `v`
+  -- (interactive_comments is on by default in an interactive shell). Delete
+  -- the line if it is in the way; nothing depends on it.
   s(
     'repriori',
     fmt(
       [[
+# <C-j>/<C-k> cycles the 'No' / 'P00' / 'generic' fields, <C-u> picks from a list
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
 "$(date +%-m/%-d/%Y)" 'Jeffrey Ke' 'Unusual Scenes' 'Autonomy' \
 '{}' '{}' '{}' '{}' '{}' \
@@ -149,19 +228,19 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         -- BATES and leadership read this column. A label, not a default: the
         -- loudest failure available for text output is an obviously-wrong cell
         -- staring back at you in the pasted row.
-        i(1, 'justification'),
-        -- Yes/No. Rarely Yes for us, so the common answer is the default.
-        i(3, 'No'),
+        i(1, 'justification (why this jumps the queue)'),
+        -- Yes/No. Rarely Yes for us, so the common answer is first in the cycle.
+        c(3, { t 'No', t 'Yes' }),
         -- Comma-separated, and every ID needs its namespace -- a bare ID
         -- silently defaults to simtest, which is how you end up prioritizing
         -- someone else's job or nothing at all.
-        i(2, 'namespace/jobid'),
+        i(2, 'namespace/jobid (comma-separated, namespace required)'),
         -- P00 company-blocking, P0 department, P1 team.
-        i(4, 'P00'),
+        c(4, { t 'P00', t 'P0', t 'P1' }),
         -- generic <300 scenes, batch <10k, delayed <100k. The requeue service
         -- rejects the row outright if the job exceeds the tier's scene limit
         -- (generic 20k, batch 100k, delayed 1M), so oversize jobs want batch.
-        i(5, 'generic'),
+        c(5, { t 'generic', t 'batch', t 'delayed' }),
       }
     )
   ),
