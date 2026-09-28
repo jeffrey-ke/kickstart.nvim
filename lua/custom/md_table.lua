@@ -368,8 +368,8 @@ end
 -- recursing. (blink.cmp resolves its own `fallback` command the same way.)
 --
 -- Routing through the global map rather than feeding the raw key is what keeps
--- the insert-mode `<C-l>` spell fix from keymaps.lua working inside markdown
--- buffers, without this file having to repeat its rhs.
+-- the insert-mode `<C-j>`/`<C-k>` LuaSnip choice cycling from init.lua working
+-- inside markdown buffers, without this file having to repeat its rhs.
 local function fallback(mode, key)
   local wanted = vim.api.nvim_replace_termcodes(key, true, true, true)
   for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
@@ -403,6 +403,139 @@ local motions = {
   ['<C-l>'] = { 'l', 'right' },
 }
 
+-- Write the table out as CSV, for importing into a spreadsheet, via bin/md2csv.
+--
+-- Range semantics follow however the range got typed: `:'<,'>MdTableCsv` from a
+-- visual selection, `:'a,'bMdTableCsv` from marks, `:15,40MdTableCsv` by number.
+-- With no range at all it falls back to block(), so `:MdTableCsv` with the cursor
+-- anywhere in the table works the same way align() does.
+--
+-- The rows go to md2csv on stdin rather than by filename, so an unsaved buffer
+-- exports what is on screen instead of what was last written to disk. The cost is
+-- that md2csv then cannot see anything outside the range, and a selection that
+-- starts at the first *body* row is not a table at all -- its find_tables wants a
+-- header plus a delimiter -- so a failure retries once with block()'s extent,
+-- which is where the header is. md2csv stays the only thing here that decides
+-- what counts as a table; this does not re-implement that test in Lua.
+local function md2csv(lines, flags)
+  local exe = vim.fn.exepath 'md2csv'
+  if exe == '' then
+    return nil, 'md2csv not on $PATH'
+  end
+  local cmd = { exe }
+  vim.list_extend(cmd, flags)
+  -- One string, not a list: md2csv reads a text stream, and a trailing newline
+  -- keeps the last row a row.
+  local stdin = table.concat(lines, '\n') .. '\n'
+  local done = vim.system(cmd, { stdin = stdin, text = true }):wait()
+  local stderr = vim.trim(done.stderr or '')
+  if done.code ~= 0 then
+    -- md2csv replays its stdin to stdout on failure (so that a misuse as a range
+    -- filter is a no-op rather than data loss), which means stdout here is the
+    -- markdown back again, not CSV. Never write it.
+    return nil, stderr
+  end
+  return done.stdout, stderr
+end
+
+-- `~` rather than the cwd: the cwd is usually the vault, SilverBullet watches it,
+-- and a stray .csv there gets picked up as a space file. md2csv's own examples
+-- write to `~/aev.csv` for the same reason.
+local function default_target(first)
+  local stem = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':t:r')
+  if stem == '' then
+    stem = 'table'
+  end
+  stem = (stem:lower():gsub('[^%w]+', '-'):gsub('^%-+', ''):gsub('%-+$', ''))
+  return ('%s/%s-L%d.csv'):format(vim.fn.expand '~', stem, first)
+end
+
+function M.to_csv(opts)
+  opts = opts or {}
+
+  local first, last
+  if (opts.range or 0) > 0 then
+    first, last = opts.line1, opts.line2
+  else
+    first, last = block(vim.api.nvim_win_get_cursor(0)[1])
+    if not first then
+      vim.notify('not inside a markdown table', vim.log.levels.WARN)
+      return
+    end
+  end
+
+  -- Anything that is not a flag is the target path, so `:MdTableCsv ~/x.csv` and
+  -- `:MdTableCsv --tsv ~/x.tsv` both work and neither one prompts.
+  local flags, target = {}, nil
+  for _, arg in ipairs(opts.fargs or {}) do
+    local mode = arg:match '^%-%-links=(.+)$'
+    if mode then
+      vim.list_extend(flags, { '--links', mode })
+    elseif arg == '--tsv' then
+      flags[#flags + 1] = '--tsv'
+    else
+      target = arg
+    end
+  end
+
+  local csv, err = md2csv(vim.api.nvim_buf_get_lines(0, first - 1, last, false), flags)
+  if not csv then
+    local wide_first, wide_last = block(first)
+    if wide_first and (wide_first < first or wide_last > last) then
+      csv, err = md2csv(vim.api.nvim_buf_get_lines(0, wide_first - 1, wide_last, false), flags)
+      if csv then
+        vim.notify(('widened to the whole table, lines %d-%d'):format(wide_first, wide_last), vim.log.levels.INFO)
+      end
+    end
+  end
+  if not csv then
+    vim.notify(err ~= '' and err or 'md2csv failed', vim.log.levels.ERROR)
+    return
+  end
+
+  -- md2csv terminates every row, and writefile() terminates every line it is
+  -- given, so the empty final element has to go or the file ends in a blank row.
+  local rows = vim.split(csv, '\n')
+  if rows[#rows] == '' then
+    table.remove(rows)
+  end
+
+  local function write(path)
+    local resolved = vim.fn.fnamemodify(vim.fn.expand(path), ':p')
+    -- A directory, or a path typed with a trailing slash, means "here, named for me".
+    if resolved:sub(-1) == '/' or vim.fn.isdirectory(resolved) == 1 then
+      resolved = resolved:gsub('/$', '') .. '/' .. vim.fn.fnamemodify(default_target(first), ':t')
+    end
+    local dir = vim.fn.fnamemodify(resolved, ':h')
+    if vim.fn.isdirectory(dir) == 0 then
+      vim.notify('no such directory: ' .. dir, vim.log.levels.ERROR)
+      return
+    end
+    if vim.fn.filereadable(resolved) == 1 and vim.fn.confirm(resolved .. ' exists. Overwrite?', '&Yes\n&No', 2) ~= 1 then
+      return
+    end
+    if vim.fn.writefile(rows, resolved) ~= 0 then
+      vim.notify('could not write ' .. resolved, vim.log.levels.ERROR)
+      return
+    end
+    vim.notify(('%d row(s) -> %s'):format(#rows, resolved), vim.log.levels.INFO)
+    -- Ragged rows mean the CSV and the markdown disagree; `<leader>ma` is the fix.
+    if err ~= '' then
+      vim.notify(err, vim.log.levels.WARN)
+    end
+  end
+
+  if target then
+    write(target)
+    return
+  end
+  vim.ui.input({ prompt = 'CSV path: ', default = default_target(first), completion = 'file' }, function(input)
+    if input and vim.trim(input) ~= '' then
+      write(vim.trim(input))
+    end
+  end)
+end
+
 function M.setup()
   vim.api.nvim_create_user_command('MdTableAddColumn', M.add_column, {
     desc = 'Add a column to the markdown table under the cursor',
@@ -410,6 +543,46 @@ function M.setup()
   vim.api.nvim_create_user_command('MdTableAlign', M.align, {
     desc = 'Line up the pipes of the markdown table under the cursor',
   })
+  -- One spec, two names: `:MdTableCsv` is what shows up under `:MdTable<Tab>`
+  -- next to Align and AddColumn, `:M2c` is for when typing that has got old.
+  local csv_spec = {
+    range = true,
+    nargs = '*',
+    complete = 'file',
+    desc = 'Write the markdown table (or the given range) to a CSV file',
+  }
+  vim.api.nvim_create_user_command('MdTableCsv', M.to_csv, csv_spec)
+  vim.api.nvim_create_user_command('M2c', M.to_csv, csv_spec)
+
+  -- ...and `:mtc` in lowercase, which cannot be a command at all -- Vim reserves
+  -- lowercase command names for builtins -- so it is a cmdline abbreviation.
+  --
+  -- `mtc`, not the `m2c` that was asked for, and the reason is worth keeping:
+  -- an abbreviation only fires when Vim sees it as a word, which it does not
+  -- after a digit. So `:5,8m2c` never expands, and what is left runs as
+  -- `:5,8move 2` -- a valid address, silently mangling the buffer ("4 lines
+  -- moved", verified). Any `m` + digit spelling has that trap. `:5,8mtc` cannot
+  -- parse as an address, so the same miss is a loud `E492: Not an editor
+  -- command` and the buffer is untouched. Use `:M2c` when the range is numeric.
+  --
+  -- The guard is the other half. An unguarded `cnoreabbrev` fires on those three
+  -- letters anywhere: in a search (`/mtc`), in a filename argument
+  -- (`:M2c ~/mtc.csv`), inside `:normal mtc`. So it expands only when what sits
+  -- in front is a *range*, which is the one place a command name can go. Marks
+  -- are stripped before the test rather than matched in it, because `'a,'b`
+  -- carries letters a character class would then have to admit everywhere, and
+  -- admitting letters is what makes `:normal mtc` expand.
+  vim.keymap.set('ca', 'mtc', function()
+    local line = vim.fn.getcmdline()
+    if vim.fn.getcmdtype() ~= ':' or line:sub(-3) ~= 'mtc' then
+      return 'mtc'
+    end
+    local head = line:sub(1, -4):gsub("'[%a<>]", '')
+    if head:match "^[%s%d.$%%,;+%-/?\\]*$" then
+      return 'MdTableCsv'
+    end
+    return 'mtc'
+  end, { expr = true, desc = 'Expand :mtc to :MdTableCsv' })
   vim.api.nvim_create_autocmd('FileType', {
     desc = 'Markdown table editing maps',
     group = vim.api.nvim_create_augroup('md_table', { clear = true }),
@@ -422,6 +595,16 @@ function M.setup()
       vim.keymap.set('n', '<leader>ma', M.align, {
         buffer = true,
         desc = '[M]arkdown table: [a]lign pipes',
+      })
+      vim.keymap.set('n', '<leader>ms', '<cmd>MdTableCsv<cr>', {
+        buffer = true,
+        desc = '[M]arkdown table: to c[s]v',
+      })
+      -- `:` in visual mode types the `'<,'>` itself, which is the whole point of
+      -- the x-mode map: the selection becomes the range without naming it.
+      vim.keymap.set('x', '<leader>ms', ':MdTableCsv<cr>', {
+        buffer = true,
+        desc = '[M]arkdown table: selection to c[s]v',
       })
       for key, motion in pairs(motions) do
         local direction, label = motion[1], motion[2]
