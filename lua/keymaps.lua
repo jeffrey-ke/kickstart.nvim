@@ -86,7 +86,10 @@ end, { desc = '[T]oggle [S]pell' })
 -- [s jumps back to it, 1z= takes the first suggestion, `]a returns to where you
 -- were typing. The <C-g>u breaks make the whole correction one undo step. Raises
 -- E756 when 'spell' is off -- that is what <leader>ts above is for.
-vim.keymap.set('i', '<C-l>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
+-- <C-f> rather than the post's <C-l>, which is taken three times over in insert
+-- mode here (blink's select_prev, LuaSnip's choice cycling, md_table's cell
+-- motion); <C-f>'s only stock insert-mode job is reindenting the current line.
+vim.keymap.set('i', '<C-f>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
 
 -- Swap ^ and $ for easier end-of-line navigation
 vim.keymap.set({ 'n', 'o', 'v' }, '^', '$')
@@ -133,17 +136,46 @@ vim.keymap.set('n', 'zf', function()
   fold_at_enclosing_function 'za'
 end, { desc = 'Toggle enclosing function fold' })
 
--- z1..z9 fold the whole buffer to a depth: z1 leaves only level-1 fold starts
--- visible (top-level markdown headings, module-level def/class), z2 one level
--- deeper, and so on. 'foldlevel' is the count of levels left *open*, so showing
--- N levels of headers means closing everything at level N -- hence N - 1.
+-- z1..z9 open the buffer down to a depth: z1 opens every level-1 fold and
+-- leaves level 2 and deeper closed, z2 opens one level further, and so on. A
+-- fold is closed exactly when its level *exceeds* 'foldlevel', so setting
+-- foldlevel to N is what opens the level-N folds -- z{N} opens level N, which
+-- is also what the digit in 'statuscolumn' (init.lua) prints on a closed fold,
+-- so the gutter names the key that opens what it is pointing at. zM still
+-- closes everything; this deliberately no longer has a key for foldlevel = 0.
 -- These shadow built-in z{height}<CR> (resize window to {height} lines), which
 -- becomes unreachable: 'z1' matches and fires before you can type the digits.
+--
+-- Diff mode sets foldmethod=diff, whose folds are the unchanged runs -- all
+-- level 1, so every z{N} would just open everything. In a diff window z{N}
+-- therefore switches back to the treesitter foldexpr (still set; only
+-- foldmethod was swapped), and z0 restores the diff folds. Both apply to every
+-- diff window in the tab: scrollbind keeps the sides aligned only while their
+-- folds match.
+local function set_diff_folds(method, level)
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.wo[win].diff then
+      vim.wo[win].foldmethod = method
+      vim.wo[win].foldlevel = level
+    end
+  end
+end
+
 for n = 1, 9 do
   vim.keymap.set('n', 'z' .. n, function()
-    vim.wo.foldlevel = n - 1
-  end, { desc = ('Fold to level %d'):format(n) })
+    if vim.wo.diff then
+      set_diff_folds('expr', n)
+    else
+      vim.wo.foldlevel = n
+    end
+  end, { desc = ('Open folds to level %d'):format(n) })
 end
+
+vim.keymap.set('n', 'z0', function()
+  if vim.wo.diff then
+    set_diff_folds('diff', 0)
+  end
+end, { desc = 'Diff: fold unchanged runs again' })
 
 -- The chain of folds enclosing the cursor, outermost first, as {start, stop}
 -- line pairs. No fold API reports this directly, so it is read the way vim
@@ -449,31 +481,170 @@ end, { desc = '[R]e[n]ame word to end of method' })
 
 vim.o.grepprg = 'rg --vimgrep'
 
-local function build_definition_pattern(word)
-  return '(function|def|class|local|const|let|var)\\s+' .. word
+-- Two lists, both about bytes read rather than relevance. The first is prose and
+-- config a code search never wants. The second is the monorepo's checked-in
+-- binaries: rg opens each one and reads a chunk to detect NUL before giving up,
+-- which is nearly free on a warm tree and one seek per file on a cold one. On a
+-- 17 GB worktree the binaries alone are 5 s of a 13 s cold `:Gr`.
+local grep_excludes = {
+  '!*.md',
+  '!*.txt',
+  '!*.json',
+  '!*.yaml',
+  '!*.yml',
+  '!*.toml',
+  '!*.lock',
+  '!*.csv',
+  '!*.{tfrecord,parquet,pb,safetensors,onnx,h5,npy,npz,pkl,pt,pth,dlc,bag,db,sqlite}',
+  '!*.{png,jpg,jpeg,gif,svg,pdf,mp4,ttf,woff,woff2}',
+  '!*.{tgz,tar,gz,zip,whl,deb,so,a,o,obj,bin,pcap,ipynb}',
+}
+
+-- Every rg here starts from this. Two flags, both measured on a cold 17 GB
+-- worktree in ~/repo, where seven clones of the same monorepo (176 GB against
+-- 62 GB of RAM) mean the page cache is cold far more often than not:
+--
+-- --max-filesize skips the handful of giant checked-in files that dominate the
+-- bytes read. In that worktree 93 of 21968 .pbtxt files carry 1.4 GB of the
+-- 3.3 GB a `:Gr` reads, while only 6 of 64317 source files are over the limit,
+-- all of them generated tables. Cold `:Gr` 12.9 s -> 4.8 s on its own.
+--
+-- -j overrides rg's own default, which is min(cores, 12) -- see
+-- crates/core/flags/hiargs.rs. The work here is I/O bound rather than CPU
+-- bound, so the extra threads are worth only ~25%, but available_parallelism
+-- keeps that correct on a PSC node with a different core count.
+local function rg_base()
+  return { 'rg', '--vimgrep', '--max-filesize', '1M', '-j', tostring(vim.uv.available_parallelism()) }
 end
 
-local function grep_and_open(pattern, dir)
-  local cmd = vim.o.grepprg .. ' -g "!*.md" -g "!*.txt" -g "!*.json" -g "!*.yaml" -g "!*.yml" -g "!*.toml" -g "!*.lock" -g "!*.csv" '
-    .. vim.fn.shellescape(pattern)
-    .. ' '
-    .. dir
-  vim.fn.setqflist({}, ' ', { title = cmd, lines = vim.fn.systemlist(cmd), efm = vim.o.grepformat })
-  vim.cmd 'copen'
-  pcall(vim.cmd, 'cfirst')
+-- A `.h` is filetype `c` or `cpp` depending on detection, and rg's `c` type does
+-- not cover `*.cc` -- pass both so a search started in a header still reaches the
+-- definition in the source file. The second alternative catches type
+-- declarations, whose name is never followed by `(`; `[^;]*$` drops forward
+-- declarations like `class Foo;`.
+local cpp_definition = {
+  types = { 'c', 'cpp' },
+  pattern = [[^([\w:<>~].*\bNAME\s*\(|(class|struct|union|enum(\s+class)?)\s+NAME\b[^;]*$)]],
+}
+
+-- A definition pattern encodes a language's formatting convention, not its
+-- grammar: C++ puts a return type before a name at column 0 (Google style does
+-- not indent inside `namespace`), Python puts a keyword before an indented name,
+-- Lua binds a name in an expression. Those shapes are mutually exclusive, so one
+-- regex cannot serve them. NAME stands in for the escaped symbol.
+local definition_search = {
+  bzl = { types = { 'bazel' }, pattern = [[^\s*(def|class)\s+NAME\b]] },
+  c = cpp_definition,
+  cpp = cpp_definition,
+  lua = { types = { 'lua' }, pattern = [[(local\s+(function\s+)?NAME\b|function\s+([\w.:]+[.:])?NAME\s*\(|NAME\s*=\s*function)]] },
+  proto = { types = { 'proto' }, pattern = [[^\s*(message|enum|service|extend)\s+NAME\b]] },
+  python = { types = { 'py' }, pattern = [[^\s*(async\s+)?(def|class)\s+NAME\b]] },
+  sh = { types = { 'sh' }, pattern = [[^\s*(function\s+)?NAME\s*(\(\)|=)]] },
+}
+
+local function escape_regex(word)
+  return (word:gsub('[\\%.%+%*%?%(%)%|%[%]%{%}%^%$]', '\\%0'))
 end
 
+-- Searches produce an in-memory list (custom.rg, custom.local_def) and
+-- custom.locations.load puts it in the *location list* of the window they
+-- started in -- never the quickfix list, which holds whatever was deliberately
+-- loaded (a pointer list pushed by Claude, a `:Cload`, a `:Make`). Each split
+-- keeps its own results (`:VGr`, `:VDef`). Step through them with `]l` / `[l`.
+local locations = require 'custom.locations'
+
+-- rg runs off the event loop, so the list is filled after this returns. The
+-- window is captured now because the user may have moved by the time rg
+-- finishes; the load jumps and opens there without taking focus. No matches
+-- leaves the window's previous list in place. `refine`, optional, reorders or
+-- filters the matches before they are loaded.
+local function grep_into_loclist(argv, open_list, refine)
+  local title = table.concat(argv, ' ')
+  local win = vim.api.nvim_get_current_win()
+  require('custom.rg').search(argv, function(found, err)
+    if err then
+      vim.notify('rg failed: ' .. err, vim.log.levels.ERROR)
+    elseif #found == 0 then
+      vim.notify('No matches: ' .. title, vim.log.levels.WARN)
+    elseif vim.api.nvim_win_is_valid(win) then
+      locations.load(refine and refine(found) or found, { win = win, title = title, open = open_list })
+    end
+  end)
+end
+
+-- For a definition search, jump to the implementation: a C++ function's body
+-- sorts ahead of its declaration in the header, which stays one `]l` away.
+local function bodies_first(word)
+  return function(found)
+    return require('custom.local_def.rank').definitions_first(found, word, require('custom.local_def.disk').load)
+  end
+end
+
+-- The local definitions of the word under the cursor, loaded like a search.
+-- Returns false when there are none, so the caller can grep instead.
+local function local_def_into_loclist(open_list)
+  local found, name = require('custom.local_def').at_cursor()
+  return locations.load(found, { title = 'local definition of ' .. (name or ''), open = open_list and #found > 1 })
+end
+
+local function excluded_argv(pattern, dir)
+  local argv = rg_base()
+  for _, glob in ipairs(grep_excludes) do
+    vim.list_extend(argv, { '--glob', glob })
+  end
+  vim.list_extend(argv, { '--', pattern, dir })
+  return argv
+end
+
+-- Unfiltered, a definition search reads every file in the monorepo to answer a
+-- question about a single language -- 3.3 GB and ~13 s cold -- so always bound
+-- the walk: by rg type when the filetype is known, else by the current file's
+-- extension. The traversal itself is not the cost (0.12 s cold for the same
+-- tree); the bytes are. --type py alone takes the same search to 1 s.
+local function definition_argv(word, dir)
+  local escaped = escape_regex(word)
+  local search = definition_search[vim.bo.filetype]
+  if search then
+    local argv = rg_base()
+    for _, rg_type in ipairs(search.types) do
+      vim.list_extend(argv, { '--type', rg_type })
+    end
+    local pattern = search.pattern:gsub('NAME', function()
+      return escaped
+    end)
+    vim.list_extend(argv, { '--', pattern, dir })
+    return argv
+  end
+
+  local generic = ('(function|local|const|let|var|def|class)\\s+%s\\b'):format(escaped)
+  local ext = vim.fn.expand '%:e'
+  if ext == '' then
+    return excluded_argv(generic, dir)
+  end
+  local argv = rg_base()
+  vim.list_extend(argv, { '--glob', '*.' .. ext, '--', generic, dir })
+  return argv
+end
+
+-- On the word under the cursor, try scope resolution first: a local variable
+-- is defined in this file, and only its enclosing scopes know which of the
+-- same-named bindings it means. Anything that is not a local falls through to
+-- the grep. A name typed as an argument has no position, so it always greps.
 vim.keymap.set('n', 'gD', function()
-  local word = vim.fn.expand '<cword>'
-  grep_and_open(build_definition_pattern(word), '.')
-end, { desc = 'Grep definition of word under cursor' })
+  if not local_def_into_loclist(true) then
+    local word = vim.fn.expand '<cword>'
+    grep_into_loclist(definition_argv(word, '.'), true, bodies_first(word))
+  end
+end, { desc = 'Definition of word under cursor: local scope, else grep' })
 
 vim.api.nvim_create_user_command('Def', function(opts)
   local args = vim.split(opts.args, '%s+')
+  if args[1] == '' and local_def_into_loclist(false) then
+    return
+  end
   local word = args[1] ~= '' and args[1] or vim.fn.expand '<cword>'
   local dir = args[2] or '.'
-  grep_and_open(build_definition_pattern(word), dir)
-  vim.cmd 'cclose'
+  grep_into_loclist(definition_argv(word, dir), false, bodies_first(word))
 end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
 
 vim.api.nvim_create_user_command('D', function(opts)
@@ -509,9 +680,13 @@ end, { nargs = '?', desc = 'Alias for :VGr' })
 
 vim.api.nvim_create_user_command('Gr', function(opts)
   local pattern = opts.args ~= '' and opts.args or vim.fn.expand '<cword>'
-  grep_and_open(pattern, '.')
+  grep_into_loclist(excluded_argv(pattern, '.'), true)
 end, { nargs = '?', desc = 'Grep (defaults to word under cursor)' })
 
+-- Substitutes across the files of the list `:Gr` just filled -- this window's
+-- location list. `:Su!` targets the quickfix list instead. There is no
+-- fallback from one to the other: this writes files, and silently switching
+-- to the quickfix list would rewrite whatever happened to be loaded there.
 vim.api.nvim_create_user_command('Su', function(opts)
   local args = vim.split(opts.args, '%s+')
   local from, to
@@ -527,14 +702,15 @@ vim.api.nvim_create_user_command('Su', function(opts)
     return
   end
 
-  local qflist = vim.fn.getqflist()
-  if #qflist == 0 then
-    vim.notify('Quickfix list is empty', vim.log.levels.WARN)
+  local list_name = opts.bang and 'quickfix list' or 'location list'
+  local entries = opts.bang and vim.fn.getqflist() or vim.fn.getloclist(0)
+  if #entries == 0 then
+    vim.notify(('The %s is empty'):format(list_name), vim.log.levels.WARN)
     return
   end
 
   local files = {}
-  for _, entry in ipairs(qflist) do
+  for _, entry in ipairs(entries) do
     if entry.bufnr and entry.bufnr > 0 then
       local fname = vim.api.nvim_buf_get_name(entry.bufnr)
       if fname ~= '' then
@@ -545,7 +721,7 @@ vim.api.nvim_create_user_command('Su', function(opts)
 
   local file_count = vim.tbl_count(files)
   if file_count == 0 then
-    vim.notify('No files in quickfix list', vim.log.levels.WARN)
+    vim.notify(('No files in the %s'):format(list_name), vim.log.levels.WARN)
     return
   end
 
@@ -557,8 +733,8 @@ vim.api.nvim_create_user_command('Su', function(opts)
   vim.cmd('silent! argdo %s/' .. sub_from .. '/' .. escaped_to .. '/ge | update')
   vim.cmd 'argdelete *'
 
-  vim.notify(string.format('Substituted "%s" -> "%s" in %d file(s)', from, to, file_count), vim.log.levels.INFO)
-end, { nargs = '+', desc = 'Substitute in quickfix files: :Su <to> or :Su <from> <to>' })
+  vim.notify(string.format('Substituted "%s" -> "%s" in %d file(s) of the %s', from, to, file_count, list_name), vim.log.levels.INFO)
+end, { nargs = '+', bang = true, desc = 'Substitute in location-list files (! = quickfix): :Su <to> or :Su <from> <to>' })
 
 -- Toggle markdown checkboxes over the cursor line, or over the visual range.
 --
@@ -622,3 +798,4 @@ vim.api.nvim_create_autocmd('FileType', {
 require('custom.stage_commit').setup()
 require('custom.code_pointers').setup()
 require('custom.md_table').setup()
+require('custom.function_motion').setup()
