@@ -315,8 +315,29 @@ vim.opt.foldtext = ''
 vim.opt.foldcolumn = 'auto:3'
 vim.opt.fillchars:append { foldopen = '▾', foldclose = '▸', foldsep = ' ' }
 
--- Soft wrap, breaking at word boundaries rather than mid-word.
-vim.opt.wrap = true
+-- The fold level as a digit beside the chevron, so a closed fold names the 'z'
+-- key that *opens* it: a fold is closed exactly when its level exceeds
+-- 'foldlevel', and z{N} (keymaps.lua) sets foldlevel to N, so the fold showing
+-- a '2' is the one z2 opens. Only on fold *start* lines -- foldlevel() is non-zero for every
+-- line inside a fold, and printing it on all of them turns the gutter to noise.
+-- '%l' is load-bearing: measured against the default gutter it already honors
+-- the 'number'/'relativenumber' hybrid, blanks itself on virtual lines (haunt's
+-- annotation boxes draw as virt_lines), and keeps CursorLineNr on the cursor's
+-- own row -- none of which has to be rebuilt here. '%C' and '%s' do have to be
+-- spelled out: assigning 'statuscolumn' takes over the entire gutter, and
+-- without them the fold chevrons and the sign column go missing. '%#FoldColumn#'
+-- groups the digit with the chevron: left alone it inherits LineNr, measured as
+-- #45475a sitting between a #89b4fa chevron and gitsigns' #a6e3a1 '+', which
+-- reads as a third unrelated thing rather than part of the fold marker. The
+-- cursor's own row gets FoldColumn instead of CursorLineFold -- both are `blue`
+-- in the theme below, so the distinction is invisible until one of them changes.
+vim.opt.statuscolumn = '%C%#FoldColumn#%{foldclosed(v:lnum)==v:lnum ? foldlevel(v:lnum) : " "}%s%=%l '
+
+-- No wrapping: a long line runs off the right edge rather than spilling onto
+-- screen lines, so a buffer line is always one display line. `linebreak` stays
+-- set so that anywhere wrap is turned back on per-buffer (`:setlocal wrap`) it
+-- breaks at word boundaries rather than mid-word.
+vim.opt.wrap = false
 vim.opt.linebreak = true
 
 -- Automatically reload files changed outside of nvim
@@ -1448,14 +1469,29 @@ require('lazy').setup({
             -- the cursor's row.
             CursorLine = { bg = dark and colors.surface1 or colors.surface0 },
             CursorLineNr = { fg = colors.lavender, bold = true },
-            -- Match the fold gutter to the fold fill. Catppuccin paints Folded
-            -- -- the '·' padding 'foldtext' leaves on a closed line -- in
-            -- `blue`, but leaves FoldColumn on overlay0, the same dim grey as
-            -- NonText: measured off a rendered pane, #89b4fa dots sitting next
-            -- to a #6c7086 chevron. CursorLineFold needs the same treatment or
-            -- the marker on the cursor's own row stays grey.
+            -- Blue is the fold *marker* color: the chevron, and the level digit
+            -- 'statuscolumn' prints next to it. Catppuccin leaves FoldColumn on
+            -- overlay0, the same dim grey as NonText, so untouched the marker
+            -- reads as chrome -- measured off a rendered pane, a #6c7086 chevron.
+            -- CursorLineFold needs the same treatment or the marker on the
+            -- cursor's own row stays grey. This was once justified as matching
+            -- the `blue` '·' fill catppuccin gives Folded; the tint below has
+            -- taken over saying "folded", so the fill is dimmed to overlay0 and
+            -- fill and marker now differ on purpose -- the band marks the extent,
+            -- the blue marks where to press.
             FoldColumn = { fg = colors.blue },
             CursorLineFold = { fg = colors.blue },
+            -- Tint the closed fold line instead of leaving the chevron to carry
+            -- it alone. With 'foldtext' empty the tint reaches further than it
+            -- looks like it should: measured off a rendered pane, the bg covers
+            -- the code text *and* the '·' fill out to the window edge, while
+            -- treesitter's foregrounds still win on top of it. The fg is only
+            -- the fallback for what syntax did not claim -- indent, punctuation,
+            -- the dots -- so catppuccin's `blue` would read as blue text on a
+            -- tint once a bg exists; overlay0 keeps it dim. The bg has to differ
+            -- from CursorLine above, or a fold on the cursor's row reads as
+            -- neither one.
+            Folded = { bg = dark and colors.surface0 or colors.crust, fg = colors.overlay0 },
             -- The terminal-cursor look: the block takes the foreground color
             -- and the character under it the background, which reads at full
             -- contrast in both flavours. Catppuccin ships rosewater here --
@@ -1580,7 +1616,7 @@ require('lazy').setup({
     main = 'nvim-treesitter.configs', -- Sets main module to use for opts
     -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
     opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
+      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'mermaid', 'query', 'vim', 'vimdoc' },
       -- Autoinstall languages that are not installed
       auto_install = true,
       highlight = {
@@ -1672,6 +1708,11 @@ vim.api.nvim_create_autocmd('ColorScheme', {
   callback = set_snacks_transparent,
 })
 
+-- C++ role colors (namespace / return type / function / parameter ...) layered
+-- over catppuccin; see lua/custom/cpp_hl.lua. After lazy.setup, so the palette
+-- is loadable for the first apply.
+require('custom.cpp_hl').setup()
+
 -- Match nvim's light/dark mode to the terminal theme after flipping it.
 -- The OptionSet autocmd (colorscheme spec) does the actual seoul256 reload.
 local function toggle_background()
@@ -1697,6 +1738,53 @@ local function reload_snippets()
 end
 vim.api.nvim_create_user_command('ReloadSnippets', reload_snippets, { desc = 'Re-read luasnippets/*.lua from disk' })
 vim.keymap.set('n', '<leader>rs', reload_snippets, { desc = '[R]eload [S]nippets' })
+
+-- Cycle a LuaSnip choice node (`c()`), e.g. the blocking / priority / tier
+-- fields of luasnippets/sh.lua's `repriori`. Not a completion item: blink's
+-- snippets source only emits *triggers*, and once a snippet is expanded
+-- LuaSnip owns the buffer, so cycling is its own change_choice() call with no
+-- menu involved. `<C-u>` routes the same options through vim.ui.select, which
+-- telescope-ui-select turns into a picker -- worth it only past a few options.
+--
+-- These share C-j/C-k with blink's select_next/select_prev (keymap block
+-- above) and lose to them while the menu is open. They still reach a choice
+-- node in the case that matters, landing on the stop, for two reasons: that
+-- leaves you in *select* mode, and blink registers an `s`-mode map only for
+-- keys whose command list holds a snippet command or a function (neither
+-- '<C-j>' entry does -- keymap/apply.lua:73), so blink is not in the way at
+-- all there; and in insert mode with the menu closed blink's 'fallback' runs
+-- the first non-blink global mapping for the key (keymap/fallback.lua:59),
+-- which is this one. Guarded on choice_active() so a non-choice stop falls
+-- through rather than swallowing the key.
+--
+-- Off a choice node each one hands its key back rather than eating it: these
+-- are global insert-mode maps, so a bare no-op would cost `<C-u>` its
+-- line-kill and `<C-j>` its newline everywhere. Fed with 'n' (no remap), so
+-- the fallthrough cannot re-enter this mapping. Not `expr = true`, which would
+-- be the tidier fallthrough but forbids the buffer edits both branches make.
+local function fallthrough(key)
+  vim.api.nvim_feedkeys(vim.keycode(key), 'n', false)
+end
+local function cycle_choice(key, delta)
+  return function()
+    local ls = require 'luasnip'
+    if not ls.choice_active() then
+      return fallthrough(key)
+    end
+    ls.change_choice(delta)
+  end
+end
+vim.keymap.set({ 'i', 's' }, '<C-j>', cycle_choice('<C-j>', 1), { desc = 'LuaSnip: next choice' })
+vim.keymap.set({ 'i', 's' }, '<C-k>', cycle_choice('<C-k>', -1), { desc = 'LuaSnip: previous choice' })
+vim.keymap.set({ 'i', 's' }, '<C-u>', function()
+  if not require('luasnip').choice_active() then
+    return fallthrough '<C-u>'
+  end
+  -- select_choice *returns* the picker rather than running on load, so it has
+  -- to be called -- a bare require works once, then package.loaded hands the
+  -- function back uncalled.
+  require 'luasnip.extras.select_choice'()
+end, { desc = 'LuaSnip: pick choice' })
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
