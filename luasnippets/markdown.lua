@@ -79,6 +79,15 @@ end
 -- table. Cell count is (pipes - 1) for a `| a | b |` line, which a literal `|`
 -- inside inline code would throw off.
 local function columns_above(line_number)
+  -- No line number means we aren't expanding: LuaSnip also evaluates this
+  -- dynamic_node to build the snippet's docstring (the completion-menu preview
+  -- blink.cmp asks for), and `env` is only populated on a real expansion, so
+  -- `TM_LINE_NUMBER` is nil there. Bail out to the caller's default rather than
+  -- counting pipes in whatever buffer happens to be current.
+  if not line_number then
+    return nil
+  end
+
   local function line_at(n)
     return vim.trim(vim.api.nvim_buf_get_lines(0, n - 1, n, false)[1] or '')
   end
