@@ -11,19 +11,23 @@
 --
 -- Persistence is manual and, out of the box, badly footgunned: `:Hi save` with
 -- no name writes a single shared `_.hl`, and a saved positional highlight stores
--- only `line,col` -- no file path -- so `:Hi load` replays those coordinates
--- into whichever buffer happens to be current. The wrappers below fix that by
--- naming the save file after the buffer's own path, auto-loading it, and
--- autosaving -- deleting the store when the last highlight goes, so a deleted
--- highlight never comes back.
+-- only `line,col` -- no file path, no text -- so `:Hi load` replays those
+-- coordinates into whichever buffer happens to be current, on whatever now sits
+-- at those lines. custom/hi_store.lua replaces it: one JSON per file keyed by
+-- repo root commit + relative path (so a worktree sees the same washes), each
+-- wash anchored by its line text so it finds its line again after a checkout,
+-- loaded on BufReadPost and autosaved -- deleting the store when the last wash
+-- goes, so an erased wash never comes back. Pattern highlights are not
+-- persisted; `:Hi save` still does that by hand if ever wanted.
 return {
   'azabiong/vim-highlighter',
-  -- Eager: the BufWinEnter restore below fires for the file passed on the
-  -- command line, which is earlier than VeryLazy would have loaded `:Hi`.
+  -- Eager: the BufReadPost restore fires for the file passed on the command
+  -- line, which is earlier than VeryLazy would have loaded the plugin.
   lazy = false,
   init = function()
-    -- Keep the store out of ~/.config (the default is $HOME/.config/keywords,
-    -- which is dotfiles territory) and out of any repo.
+    -- The plugin still wants a directory for `:Hi save`; keep it out of
+    -- ~/.config (the default is $HOME/.config/keywords, which is dotfiles
+    -- territory) and out of any repo. hi_store's files live under it too.
     local dir = vim.fs.joinpath(vim.fn.stdpath 'data', 'highlighter')
     vim.fn.mkdir(dir, 'p')
     vim.g.HiKeywords = dir
@@ -37,53 +41,19 @@ return {
     vim.g.HiErase = '' -- f<BS>
     vim.g.HiClear = '' -- f<C-L>
 
-    local annot = function()
-      return require 'custom.annot'
+    local store = function()
+      return require 'custom.hi_store'
     end
 
     vim.keymap.set('n', '<leader>Hs', function()
-      annot().save()
+      store().save()
     end, { desc = '[H]ighlights: [s]ave for this file' })
     vim.keymap.set('n', '<leader>Hl', function()
-      annot().load(false)
-    end, { desc = '[H]ighlights: [l]oad for this file' })
+      store().detach(0)
+      store().load(0, false)
+    end, { desc = '[H]ighlights: re[l]oad for this file' })
 
-    local group = vim.api.nvim_create_augroup('highlighter-persist', { clear = true })
-
-    -- Restore on open. Window-scoped like the save itself, guarded so
-    -- revisiting a buffer does not stack duplicates.
-    vim.api.nvim_create_autocmd('BufWinEnter', {
-      group = group,
-      callback = function()
-        if vim.b.hi_restored then
-          return
-        end
-        vim.b.hi_restored = true
-        annot().load(true)
-      end,
-      desc = 'Load saved highlights for this file',
-    })
-
-    -- Autosave. Adds and deletes made through our own keys already write
-    -- through; these catch the rest (`f<CR>` patterns, `:Hi` used directly).
-    vim.api.nvim_create_autocmd({ 'BufWinLeave', 'BufWritePost' }, {
-      group = group,
-      callback = function()
-        annot().autosave()
-      end,
-      desc = 'Save highlights for this file',
-    })
-    vim.api.nvim_create_autocmd('VimLeavePre', {
-      group = group,
-      callback = function()
-        for _, win in ipairs(vim.api.nvim_list_wins()) do
-          vim.api.nvim_win_call(win, function()
-            annot().autosave()
-          end)
-        end
-      end,
-      desc = 'Save highlights in every window before quitting',
-    })
+    store().setup()
   end,
   config = function()
     -- After the plugin is sourced, so this mapping wins the t<CR> slot.

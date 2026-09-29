@@ -2,14 +2,20 @@
 --
 -- A note is an extmark (`right_gravity = true`) rendered as `virt_text`, so it
 -- rides the line it is attached to while you edit above, below, or inside it.
--- Storage is one JSON file per project *per git branch*, keyed by the git root
--- commit, under `data_dir` -- nothing is ever written into the source file, so
--- nothing reaches git.
+-- Storage is one JSON file per project, keyed by the git root commit, under
+-- `data_dir` -- nothing is ever written into the source file, so nothing
+-- reaches git. One file for every branch and worktree of the repo
+-- (`per_branch_bookmarks = false`): the notes are about the code, not about
+-- the branch, and a per-branch store meant a checkout emptied the screen and a
+-- new worktree started blank. `:HauntMergeBranches` folds the old per-branch
+-- files of a repo into its shared one.
 --
--- The one gap: only `{file, line, note, id}` is persisted. Line drift is exact
--- while the buffer is open, but a change made to the file while nvim is closed
--- (a pull, a formatter) is not re-anchored -- the note comes back on its old
--- line number.
+-- haunt itself persists only `{file, line, note, id}` and puts a note back on
+-- that exact line number, so a change made to the file while nvim is not
+-- tracking it (a checkout, a pull, a formatter) would land it on the wrong
+-- line. custom/haunt_anchor.lua adds a content anchor to each saved bookmark
+-- and looks the line up again before haunt draws it; a line that is gone keeps
+-- its old number and shows a `⚠`.
 --
 -- Upstream suggests `<leader>h` as the prefix; that is taken here twice over
 -- (window-left in lua/keymaps.lua, and which-key's 'Git [H]unk' group), so this
@@ -69,7 +75,7 @@ return {
     annotation_prefix = '  󰆉 ',
     sign = '󱙝',
     sign_hl = 'DiagnosticInfo',
-    per_branch_bookmarks = true,
+    per_branch_bookmarks = false,
     -- Pinned, not 'auto': install_picker_view() passes snacks-shaped opts.
     picker = 'snacks',
   },
@@ -130,6 +136,7 @@ return {
   config = function(_, opts)
     require('haunt').setup(opts)
     require('custom.annot').install_clipping()
+    require('custom.haunt_anchor').install()
     install_picker_view()
   end,
 }

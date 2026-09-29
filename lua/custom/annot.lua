@@ -57,6 +57,12 @@ local function ensure_loaded()
   end
   return pen_count()
 end
+M.ensure_loaded = ensure_loaded
+
+-- Saving and restoring washes lives in custom/hi_store.lua.
+local function autosave()
+  require('custom.hi_store').autosave()
+end
 
 --- The pen: a 1-based index into the background-only pack, clamped to what
 --- actually exists.
@@ -89,8 +95,9 @@ end
 ---
 --- Per-note colors are not
 --- on offer -- haunt bakes the group name into each extmark but persists only
---- `{file, line, note}`, so every note re-rendered after a reload or a
---- `toggle_all_lines` would come back in whichever color was configured then.
+--- `{file, line, note}` (plus the anchor custom/haunt_anchor.lua adds), so every
+--- note re-rendered after a reload or a `toggle_all_lines` would come back in
+--- whichever color was configured then.
 ---
 --- A link rather than copied attributes: `:colorscheme` runs `hi clear`, and
 --- vim-highlighter re-tunes `HiColor*` for dark/light from its own ColorScheme
@@ -225,7 +232,7 @@ function M.recolor()
   if n == 0 then
     return vim.notify('annot: no wash under the cursor', vim.log.levels.WARN)
   end
-  M.autosave()
+  autosave()
   vim.api.nvim_echo({ { ('recolored %d to '):format(n) }, { (' %d '):format(pen()), group } }, false, {})
 end
 
@@ -274,12 +281,12 @@ function M.region(opts)
   -- the note already would; after a rollback that just rewrites what was there.
   M.edit_note {
     on_done = function()
-      M.autosave()
+      autosave()
     end,
     on_cancel = function()
       rollback(ns, before)
       pcall(vim.api.nvim_win_set_cursor, 0, origin)
-      M.autosave()
+      autosave()
     end,
   }
 end
@@ -303,96 +310,6 @@ function M.command(args)
   }
 end
 
--- ---------------------------------------------------------------------------
--- Persistence. vim-highlighter saves only on demand, and bare `:Hi save`
--- shares a single `_.hl` whose positional records carry no file path -- so
--- every save here is keyed to the buffer's own path.
--- ---------------------------------------------------------------------------
-
---- `/home/jke/x/y.py` -> `home%jke%x%y.py`. nil for anything not a real file.
-function M.slug()
-  local path = vim.api.nvim_buf_get_name(0)
-  if path == '' or vim.bo.buftype ~= '' then
-    return nil
-  end
-  return (vim.fs.normalize(path):gsub('^/', ''):gsub('/', '%%'))
-end
-
-local function store_path(name)
-  return vim.fs.joinpath(vim.g.HiKeywords or vim.fs.joinpath(vim.fn.stdpath 'data', 'highlighter'), name .. '.hl')
-end
-
---- Does this window hold anything `:Hi save` would write? Positional washes are
---- extmarks in the `HiColor` namespace; pattern highlights are window matches.
-function M.has_highlights()
-  local ns = hi_namespace()
-  if ns and #vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {}) > 0 then
-    return true
-  end
-  for _, m in ipairs(vim.fn.getmatches()) do
-    if tostring(m.group):match('^HiColor') then
-      return true
-    end
-  end
-  return false
-end
-
---- Write this file's highlights, or delete the store when none are left, so a
---- deleted highlight never comes back. Silent -- for autocmds and hot paths.
-function M.autosave()
-  local name = M.slug()
-  if not name then
-    return
-  end
-  if M.has_highlights() then
-    pcall(vim.cmd, { cmd = 'Hi', args = { 'save', name }, mods = { silent = true } })
-  -- Only prune once a load has actually run for this buffer. Deleting on the
-  -- strength of an empty buffer we never restored would discard the store.
-  elseif vim.b.hi_load_ok then
-    -- `.hl.o` too: vim-highlighter renames the old store to that on every save
-    -- (autoload/highlighter.vim:1220), so leaving it behind would keep a copy
-    -- of exactly the highlights that were just deleted.
-    for _, p in ipairs { store_path(name), store_path(name) .. '.o' } do
-      if vim.uv.fs_stat(p) then
-        vim.fn.delete(p)
-      end
-    end
-  end
-end
-
---- Manual save, with a message. `<leader>Hs`.
-function M.save()
-  local name = M.slug()
-  if not name then
-    return vim.notify('highlighter: buffer has no file to key highlights to', vim.log.levels.WARN)
-  end
-  M.autosave()
-  vim.notify(
-    M.has_highlights() and ('highlighter: saved -> ' .. name .. '.hl') or 'highlighter: no highlights, store cleared',
-    vim.log.levels.INFO
-  )
-end
-
---- Restore this file's highlights. Sets `b:hi_load_ok`, which gates pruning.
----@param quiet? boolean
-function M.load(quiet)
-  local name = M.slug()
-  if not name then
-    return
-  end
-  if not vim.uv.fs_stat(store_path(name)) then
-    -- Nothing saved is a legitimate "loaded" state: an empty buffer is then
-    -- known-good, and autosave may prune later.
-    vim.b.hi_load_ok = true
-    if not quiet then
-      vim.notify('highlighter: nothing saved for this file', vim.log.levels.INFO)
-    end
-    return
-  end
-  local ok = pcall(vim.cmd, { cmd = 'Hi', args = { 'load', name }, mods = { silent = true } })
-  vim.b.hi_load_ok = ok
-end
-
 --- Redefine the mutating vim-highlighter keys: `t<CR>` so a bare region
 --- highlight uses the pen, and `f<BS>`/`f<C-L>` so a deletion is persisted
 --- immediately. Call after the plugin has loaded; requires the matching
@@ -401,7 +318,7 @@ function M.use_pen_for_hi_keys()
   local function wrap(mode, lhs, fn, desc)
     vim.keymap.set(mode, lhs, function()
       fn()
-      M.autosave()
+      autosave()
     end, { silent = true, desc = desc })
   end
 
@@ -490,7 +407,7 @@ local function render_as(bm, line, pos)
   if bm.annotation_extmark_id then
     display.hide_annotation(0, bm.annotation_extmark_id)
   end
-  local ok, id = pcall(display.show_annotation, 0, line, bm.note)
+  local ok, id = pcall(display.show_annotation, 0, line, require('custom.haunt_anchor').display_note(bm))
   bm.annotation_extmark_id = ok and id or nil
   config.setup { virt_text_pos = restore }
 end
