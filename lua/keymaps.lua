@@ -580,13 +580,6 @@ local function bodies_first(word)
   end
 end
 
--- The local definitions of the word under the cursor, loaded like a search.
--- Returns false when there are none, so the caller can grep instead.
-local function local_def_into_loclist(open_list)
-  local found, name = require('custom.local_def').at_cursor()
-  return locations.load(found, { title = 'local definition of ' .. (name or ''), open = open_list and #found > 1 })
-end
-
 local function excluded_argv(pattern, dir)
   local argv = rg_base()
   for _, glob in ipairs(grep_excludes) do
@@ -626,25 +619,60 @@ local function definition_argv(word, dir)
   return argv
 end
 
--- On the word under the cursor, try scope resolution first: a local variable
--- is defined in this file, and only its enclosing scopes know which of the
--- same-named bindings it means. Anything that is not a local falls through to
--- the grep. A name typed as an argument has no position, so it always greps.
-vim.keymap.set('n', 'gD', function()
-  if not local_def_into_loclist(true) then
-    local word = vim.fn.expand '<cword>'
-    grep_into_loclist(definition_argv(word, '.'), true, bodies_first(word))
+-- The definition of the word under the cursor, from the first of these with
+-- an answer:
+--
+--   1. Scope resolution. A local variable is defined in this file, and only
+--      its enclosing scopes know which of the same-named bindings it means.
+--   2. Python: jedi, for what scopes cannot see -- an attribute, or a name an
+--      import binds, which says only that the definition is in another file.
+--   3. The import line itself, when jedi cannot follow it: the module is not
+--      installed, so the grep has nothing better to find.
+--   4. The grep.
+--
+-- jedi answers asynchronously, so everything the later steps need -- window,
+-- word, the grep's filetype-bound argv -- is read at the keypress.
+local function definition_at_cursor(open_list)
+  local win = vim.api.nvim_get_current_win()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local word = vim.fn.expand '<cword>'
+  local argv = definition_argv(word, '.')
+  local found, name, imported = require('custom.local_def').at_cursor()
+
+  local function scope_or_grep()
+    if not locations.load(found, { win = win, title = 'local definition of ' .. (name or ''), open = open_list and #found > 1 }) then
+      vim.api.nvim_win_call(win, function()
+        grep_into_loclist(argv, open_list, bodies_first(word))
+      end)
+    end
   end
-end, { desc = 'Definition of word under cursor: local scope, else grep' })
+
+  local jedi = require 'custom.jedi_def'
+  if (#found > 0 and not imported) or not jedi.available(bufnr) then
+    return scope_or_grep()
+  end
+  jedi.find(bufnr, cursor[1] - 1, cursor[2], function(defs)
+    if not vim.api.nvim_win_is_valid(win) then
+      return
+    end
+    if not locations.load(defs, { win = win, title = 'definition of ' .. word, open = open_list and #defs > 1 }) then
+      scope_or_grep()
+    end
+  end)
+end
+
+-- A name typed as an argument has no position, so it always greps.
+vim.keymap.set('n', 'gD', function()
+  definition_at_cursor(true)
+end, { desc = 'Definition of word under cursor: local scope, jedi, else grep' })
 
 vim.api.nvim_create_user_command('Def', function(opts)
   local args = vim.split(opts.args, '%s+')
-  if args[1] == '' and local_def_into_loclist(false) then
-    return
+  if args[1] == '' then
+    return definition_at_cursor(false)
   end
-  local word = args[1] ~= '' and args[1] or vim.fn.expand '<cword>'
-  local dir = args[2] or '.'
-  grep_into_loclist(definition_argv(word, dir), false, bodies_first(word))
+  grep_into_loclist(definition_argv(args[1], args[2] or '.'), false, bodies_first(args[1]))
 end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
 
 vim.api.nvim_create_user_command('D', function(opts)

@@ -8,8 +8,9 @@
 -- their behavior is pinned by tests/local_def_test.lua.
 --
 -- Anything that is not a local or a member -- a function, a type, a name from
--- another file -- resolves to nothing, and the caller falls back to its
--- repo-wide grep.
+-- another file -- resolves to nothing, and the caller falls back to jedi
+-- (Python) or its repo-wide grep. A Python import does resolve, flagged: it is
+-- a binding, but it only says the definition is in another file.
 
 local collect = require 'custom.local_def.collect'
 local disk = require 'custom.local_def.disk'
@@ -20,9 +21,10 @@ local resolve = require 'custom.local_def.resolve'
 local M = {}
 
 --- Definitions of the identifier at the 0-based (row, col) of `bufnr`, nearest
---- first, as { {row, col, name, path} }. `path` is set only for a definition
---- in another file. {} when the buffer has no supported parser, the position
---- is not on a variable name, or nothing in scope binds it.
+--- first, as { {row, col, name, path, import} }. `path` is set only for a
+--- definition in another file; `import` only for a binding an import made.
+--- {} when the buffer has no supported parser, the position is not on a
+--- variable name, or nothing in scope binds it.
 function M.find(bufnr, row, col)
   local lang = vim.treesitter.language.get_lang(vim.bo[bufnr].filetype)
   local spec = lang and languages[lang]
@@ -54,7 +56,7 @@ function M.find(bufnr, row, col)
   local ref = { name = name, scope = ref_scope, pos = { node:start() } }
   return vim.tbl_map(function(def)
     local elsewhere = def.path and def.path ~= buffer_path
-    return { row = def.pos[1], col = def.pos[2], name = def.name, path = elsewhere and def.path or nil }
+    return { row = def.pos[1], col = def.pos[2], name = def.name, path = elsewhere and def.path or nil, import = def.import }
   end, resolve.resolve(scopes, defs, ref, spec.rules))
 end
 
@@ -66,9 +68,10 @@ local function line_at(bufnr, def)
 end
 
 --- Definitions of the word under the cursor as custom.locations entries,
---- nearest first, plus the name looked up (for a list title). An empty list
---- when there is no local definition. Loading them anywhere is the caller's
---- job -- see custom.locations.load.
+--- nearest first, plus the name looked up (for a list title) and whether every
+--- one is an import -- a binding that only says the definition is elsewhere.
+--- An empty list when there is no local definition. Loading them anywhere is
+--- the caller's job -- see custom.locations.load.
 function M.at_cursor()
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor = vim.api.nvim_win_get_cursor(0)
@@ -82,7 +85,10 @@ function M.at_cursor()
     end
     return location
   end, found)
-  return locations, found[1] and found[1].name
+  local imported = #found > 0 and vim.iter(found):all(function(def)
+    return def.import
+  end)
+  return locations, found[1] and found[1].name, imported
 end
 
 return M

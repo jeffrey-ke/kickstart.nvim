@@ -5,8 +5,9 @@
 -- `setqflist` from `nvim_buf_get_name` hands over an absolute path -- `:Make`
 -- (init.lua's pyright command), LSP handlers, and Claude pushing a list of code
 -- pointers -- and then every line of the window is 40 columns of
--- `/home/jke/...` before the part worth reading. `gD`/`:Def` escape it only
--- because rg is given a relative search path.
+-- `/home/jke/...` before the part worth reading. `gD`/`:Def`'s grep escapes
+-- it only because rg is given a relative search path; their jedi answers,
+-- which are absolute, do not.
 --
 -- `quickfixtextfunc` is the supported hook (`:h quickfix-window-function`). It
 -- owns the *whole* line, not just the path, so the rest of this reproduces

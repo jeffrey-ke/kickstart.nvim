@@ -7,7 +7,8 @@
 -- That is the item shape setqflist and setloclist take, so loading needs no
 -- conversion, and it is the shape the pointer skill's saved .json lists use.
 --
--- Producers: `from_vimgrep` (rg output), custom.local_def (scope lookup).
+-- Producers: `from_vimgrep` (rg output), custom.local_def (scope lookup),
+-- custom.jedi_def (Python definitions, via from_vimgrep).
 -- Consumer: `load`, into a window's location list or the quickfix list.
 
 local M = {}

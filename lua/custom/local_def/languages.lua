@@ -171,13 +171,14 @@ local function outer_name(node, emit)
   emit(field(node, 'name'), { owner = 'outer' })
 end
 
--- `import os.path` binds `os`; `import numpy as np` binds `np`.
+-- `import os.path` binds `os`; `import numpy as np` binds `np`. Marked as
+-- imports: the binding is real, but the definition lives in another file.
 local function imported_names(node, emit)
   for _, name in ipairs(node:field('name')) do
     if name:type() == 'aliased_import' then
-      emit(field(name, 'alias'))
+      emit(field(name, 'alias'), { import = true })
     elseif name:type() == 'dotted_name' then
-      emit(named_children(name)[1])
+      emit(named_children(name)[1], { import = true })
     end
   end
 end

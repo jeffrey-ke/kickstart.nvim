@@ -279,6 +279,32 @@ for _, name in ipairs { 'np', 'path', 'fh', 'err', 'j' } do
   case('python: binding form for ' .. name, 'python', forms, { name, 2 }, { { name, 1 } })
 end
 
+-- Whether each resolved binding came from an import: `gD` asks jedi to follow
+-- an import instead of stopping at it.
+local function import_flags(label, src, ref, want)
+  local lines = vim.split(vim.trim(src), '\n')
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].filetype = 'python'
+  local pos = at(lines, ref[1], ref[2])
+  check(label, vim.tbl_map(function(def)
+    return def.import == true
+  end, local_def.find(bufnr, pos[1], pos[2])), want)
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+end
+
+import_flags('python: from-import is an import', 'from pkg.mod import name\nname()', { 'name', 2 }, { true })
+import_flags('python: aliased import is an import', 'import numpy as np\nnp.zeros(3)', { 'np', 2 }, { true })
+import_flags('python: dotted import is an import', 'import os.path\nos.getcwd()', { 'os', 2 }, { true })
+import_flags('python: assignment is not', 'x = 1\nprint(x)', { 'x', 2 }, { false })
+import_flags('python: fallback assignment beside an import', [[
+try:
+    from fast import impl
+except ImportError:
+    impl = None
+impl()
+]], { 'impl', 3 }, { false, true })
+
 local params = [[
 def f(x, y: int, z=1, w: int = 2, *args, **kw):
     return x, y, z, w, args, kw

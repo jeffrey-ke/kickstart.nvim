@@ -31,7 +31,8 @@ end
 --- innermost scope open at the node -- the node's own, if it opens one --
 --- 'outer' is that scope's parent, and 'function' is the innermost scope that
 --- is not a comprehension (a Python walrus binds past its comprehension).
---- `opts.kind` defaults to 'bind'.
+--- `opts.kind` defaults to 'bind'. `opts.import` marks a binding made by an
+--- import statement, carried through to the def unchanged.
 ---
 --- `members_for(function_node)`, optional, supplies bindings for a class body
 --- that encloses a function without containing it in the tree -- a C++ method
@@ -70,6 +71,7 @@ function M.collect(root, source, spec, ref, members_for)
       scope = owner(opts.owner),
       pos = { identifier:start() },
       kind = opts.kind or 'bind',
+      import = opts.import,
     })
   end
 
