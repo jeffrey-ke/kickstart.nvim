@@ -26,6 +26,8 @@
 -- their old rows rather than moving or dropping them. Pattern highlights
 -- (`f<CR>`, window matches) are not persisted; the plugin's own `:Hi save`
 -- still does that by hand.
+--
+-- Model, data formats and invariants: .docs_claude/design/annotations.md.
 local M = {}
 
 local NS_NAME = 'HiColor'

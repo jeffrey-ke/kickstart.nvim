@@ -30,6 +30,9 @@
 -- survives until the line reappears (checking the original branch back out
 -- heals it) or the note is edited or deleted. Editing the note counts as the
 -- user confirming the line.
+--
+-- Model, haunt internals relied on, and invariants:
+-- .docs_claude/design/annotations.md.
 local M = {}
 
 local STALE_MARK = '⚠ '

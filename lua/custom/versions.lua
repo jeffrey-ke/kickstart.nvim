@@ -37,6 +37,9 @@
 -- their old rows -- they neither move nor vanish (measured on 0.12) -- and both
 -- plugins would otherwise trust them. And why nothing is saved at that
 -- moment: the buffer is already empty by then, only the marks are left.
+--
+-- The full model -- engines, data model, state machine, invariants I1..I7 --
+-- is .docs_claude/design/annotations.md. Read it before changing this file.
 local M = {}
 
 local api, uv = vim.api, vim.uv
