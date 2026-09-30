@@ -1,11 +1,12 @@
--- Content anchors: find a line again after the file changed underneath it.
+-- Content anchors: find a line again by its text.
 --
--- Both haunt.nvim and vim-highlighter persist a bare line number, and a line
--- number is only meaningful for the exact file it was taken from. A checkout,
--- a pull, a formatter -- anything that edits the file while nvim is not
--- watching -- leaves the mark on the right number and the wrong line. An
--- anchor is the *text* of the line plus its nearest non-blank neighbours, so
--- the line can be found again wherever it moved to.
+-- An anchor is the *text* of a line plus its nearest non-blank neighbours.
+-- The primary way a mark follows its line across versions of a file is the
+-- diff mapping in custom/versions.lua; this is the fallback for the one thing
+-- a diff cannot say -- where a *deleted* line went -- and for stores written
+-- before snapshots existed. A parked mark keeps its anchor and is resurrected
+-- when the same text turns up again (the branch checked back out, the block
+-- moved rather than removed).
 --
 -- Pure: every function takes a lines array, not a buffer, so the same code
 -- anchors against `nvim_buf_get_lines` and against `vim.fn.readfile` (the

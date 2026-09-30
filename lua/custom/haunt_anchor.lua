@@ -1,61 +1,58 @@
--- Content anchors for haunt.nvim notes, so a note follows its line across a
--- checkout, a worktree, a pull, a formatter -- anything that changes the file
--- while nvim is not tracking it.
+-- haunt.nvim notes carried across versions of the file by custom/versions.lua.
 --
--- haunt persists `{file, line, note, id}` and nothing else, and places each
--- note back on that exact line number. This adds an `anchor` (custom/anchor.lua:
--- the line's text plus its neighbours) to every bookmark it saves, and looks
--- the line up again by content before haunt draws it.
+-- haunt persists `{file, line, note, id}` and puts each note back on that
+-- exact line number. This maps the line through the diff between the file's
+-- snapshot and the buffer before haunt draws, and adds to each saved bookmark
+-- an `anchor` (custom/anchor.lua: the line's text plus its neighbours) for
+-- the one case a diff cannot answer, a deleted line.
 --
 -- Three seams into the plugin, none of them a fork:
 --
 --   * `persistence._build_serializable` is what turns bookmarks into JSON. It
---     copies a fixed list of fields and drops the rest, so the anchor is added
---     to its result. Loading keeps unknown fields as they are, so nothing is
---     needed on that side.
+--     copies a fixed list of fields and drops the rest, so `anchor` and
+--     `stale` are added to its result. Loading keeps unknown fields as they
+--     are, so nothing is needed on that side.
 --   * `restoration.restore_buffer_bookmarks(bufnr)` is the one function every
 --     placement goes through -- BufReadPost, the startup pass over already-open
 --     buffers, and `api.reload`. Called as a module field, so replacing it on
---     the module table intercepts all three. The anchors are resolved against
---     the buffer just before the original runs.
---   * `BufReadPre`. A reload (`:e`, autoread after a checkout) does *not* move
---     or drop the extmarks: they stay frozen at their old rows (verified on
---     0.12). haunt then (a) refuses to restore a buffer that still has any
---     extmark in its namespace and (b) syncs `bookmark.line` from those frozen
---     rows on every read -- which would overwrite a resolved line with the old
---     number and then persist it. So before the read, the store is synced once
---     (the frozen row *is* the exact pre-reload line, which is the best
---     `expect` there is), then the buffer's marks, signs and ids are dropped
---     and its restore tracking cleared.
+--     the module table intercepts all three. `versions.ensure_mapped` runs
+--     there, just before the original, so `bookmark.line` is already right.
+--   * Detaching on `BufReadPre` (driven by versions.lua). A reload leaves the
+--     extmarks frozen at their old rows; haunt then (a) refuses to restore a
+--     buffer that still has any extmark in its namespace and (b) syncs
+--     `bookmark.line` from those frozen rows on every read, which would
+--     overwrite a mapped line with the old number. So the marks, signs, ids
+--     and restore tracking are dropped before the read.
 --
--- An anchor that cannot be found anywhere keeps its old line (clamped to the
--- file) and is *stale*: drawn with a `⚠` in front, listed once per buffer,
--- and -- the part that matters -- its anchor is not recaptured, so the text it
--- is looking for survives until the line reappears (checking the original
--- branch back out heals it) or the note is edited or deleted. Editing the note
--- counts as the user confirming the line.
---
--- Anchors are captured on every save (haunt saves after each mutation and at
--- exit -- it has no TextChanged autosave, whatever its docs say), on
--- `BufWritePost`, and after every restore. In the ordinary case -- buffer
--- written, then something changes the file -- they are exact.
+-- A note whose line was deleted is parked where the deletion happened and is
+-- *stale*: drawn with a `⚠` in front, listed once per buffer, and -- the part
+-- that matters -- its anchor is not recaptured, so the text it is looking for
+-- survives until the line reappears (checking the original branch back out
+-- heals it) or the note is edited or deleted. Editing the note counts as the
+-- user confirming the line.
 local M = {}
 
 local STALE_MARK = '⚠ '
 
---- id -> true for a bookmark whose line was not found on the last restore.
+--- id -> true for a bookmark whose line is gone.
 local stale = {}
+--- bufnr -> the mapping generation whose stale notes were last reported.
+local reported = {}
 
 local function anchor()
   return require 'custom.anchor'
+end
+
+local function have_haunt()
+  return pcall(require, 'haunt.store')
 end
 
 local function file_of(bufnr)
   return require('haunt.utils').normalize_filepath(vim.api.nvim_buf_get_name(bufnr))
 end
 
-local function lines_of(bufnr)
-  return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+local function clamp(v, lo, hi)
+  return math.max(lo, math.min(v, hi))
 end
 
 --- Is this note drawn with the stale marker? annot.lua asks when it redraws
@@ -73,42 +70,55 @@ function M.display_note(bm)
   return (M.is_stale(bm) and STALE_MARK or '') .. (bm.note or '')
 end
 
---- Refresh the anchors of every non-stale bookmark in `bufnr` from its
---- current text.
+--- Refresh the anchors of this file's bookmarks from the buffer's text --
+--- except the stale ones, which keep the text they are looking for. Returns
+--- how many bookmarks the file has. Called by `versions.persist`.
 ---@param bufnr integer
+---@return integer
 function M.capture_buffer(bufnr)
-  if not vim.api.nvim_buf_is_loaded(bufnr) then
-    return
+  if not (have_haunt() and vim.api.nvim_buf_is_loaded(bufnr)) then
+    return 0
   end
   local file = file_of(bufnr)
   if file == '' then
-    return
+    return 0
   end
-  local lines = lines_of(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local n = 0
   for _, bm in ipairs(require('haunt.store').get_all_raw()) do
-    if bm.file == file and not stale[bm.id] and bm.line and bm.line >= 1 and bm.line <= #lines then
-      bm.anchor = anchor().capture(lines, bm.line)
-    end
-  end
-end
-
---- `on_pre_save`: capture from every loaded buffer that holds bookmarks.
---- `ctx.bookmarks` is already extmark-synced.
-local function capture_loaded(ctx)
-  local seen = {}
-  for _, bm in ipairs(ctx.bookmarks) do
-    if not seen[bm.file] then
-      seen[bm.file] = true
-      local bufnr = vim.fn.bufnr(bm.file)
-      if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
-        M.capture_buffer(bufnr)
+    if bm.file == file then
+      n = n + 1
+      if stale[bm.id] then
+        bm.stale = true
+      else
+        bm.stale = nil
+        if bm.line and bm.line >= 1 and bm.line <= #lines then
+          bm.anchor = anchor().capture(lines, bm.line)
+        end
       end
     end
   end
+  return n
 end
 
---- Before the buffer is re-read: sync once, then forget the marks.
-local function detach(bufnr)
+--- Write haunt's store, if there is anything in it.
+function M.save_store()
+  if not have_haunt() then
+    return
+  end
+  local store = require 'haunt.store'
+  if store.has_bookmarks() then
+    store.save()
+  end
+end
+
+--- Before the buffer is re-read: sync once (the frozen row *is* the exact
+--- pre-reload line), then forget the marks.
+---@param bufnr integer
+function M.detach(bufnr)
+  if not have_haunt() then
+    return
+  end
   local file = file_of(bufnr)
   if file == '' then
     return
@@ -129,68 +139,113 @@ local function detach(bufnr)
   require('haunt.restoration').cleanup_buffer_tracking(bufnr)
 end
 
---- Move each of this file's bookmarks to where its anchor now is. Returns the
---- ones that were not found.
+--- Move this file's bookmarks to their lines in `lines`, through `mapper`
+--- (snapshot -> buffer; nil when the file has no snapshot yet). Called by
+--- `versions.ensure_mapped`.
 ---@param bufnr integer
----@return table[] orphans
-local function reanchor(bufnr)
+---@param lines string[]
+---@param mapper annot.Mapper|nil
+function M.reanchor(bufnr, lines, mapper)
+  if not have_haunt() then
+    return
+  end
   local file = file_of(bufnr)
-  local lines = lines_of(bufnr)
-  local orphans = {}
+  if file == '' then
+    return
+  end
+  local n = math.max(#lines, 1)
   for _, bm in ipairs(require('haunt.store').get_all_raw()) do
     if bm.file == file then
-      local at = bm.anchor and anchor().resolve(lines, bm.anchor, bm.line)
-      if at then
+      if bm.stale then
+        stale[bm.id] = true
+      end
+
+      --- The one text lookup: the line as it was, wherever it is now.
+      local function resurrect()
+        local at = bm.anchor and anchor().resolve(lines, bm.anchor, bm.line)
+        if not at then
+          return false
+        end
         bm.line = at
         stale[bm.id] = nil
-      else
-        -- Clamped either way, so it renders; a store written before anchors
-        -- existed has none and simply keeps its number, un-flagged.
-        bm.line = math.max(1, math.min(bm.line, #lines))
+        bm.stale = nil
+        return true
+      end
+
+      if stale[bm.id] then
+        if not resurrect() then
+          bm.line = mapper and mapper.line(bm.line) or clamp(bm.line, 1, n)
+        end
+      elseif mapper then
+        local at, kind = mapper.line(bm.line)
+        if kind == 'deleted' and not resurrect() then
+          stale[bm.id] = true
+          bm.line = at
+        elseif kind ~= 'deleted' then
+          bm.line = at
+        end
+      elseif not resurrect() then
+        -- A store from before snapshots existed: text anchors, else the number.
+        bm.line = clamp(bm.line, 1, n)
         if bm.anchor then
           stale[bm.id] = true
-          orphans[#orphans + 1] = bm
         end
       end
     end
   end
-  return orphans
 end
 
---- Wrap haunt's restore: resolve first, draw, then mark the orphans.
+--- Draw the buffer's notes again (after `versions.remap`).
+---@param bufnr integer
+function M.redraw(bufnr)
+  if have_haunt() then
+    require('haunt.api').restore_buffer_bookmarks(bufnr)
+  end
+end
+
+--- Wrap haunt's restore: map first, draw, then mark the stale ones.
 local function install_restore()
   local restoration = require 'haunt.restoration'
   local display = require 'haunt.display'
+  local store = require 'haunt.store'
   local restore = restoration.restore_buffer_bookmarks
   restoration.restore_buffer_bookmarks = function(bufnr, annotations_visible)
     if not (vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr)) then
       return restore(bufnr, annotations_visible)
     end
-    local orphans = reanchor(bufnr)
+    require('custom.versions').ensure_mapped(bufnr)
     local ok = restore(bufnr, annotations_visible)
-    for _, bm in ipairs(orphans) do
-      if bm.note and bm.annotation_extmark_id then
-        display.hide_annotation(bufnr, bm.annotation_extmark_id)
-        bm.annotation_extmark_id = display.show_annotation(bufnr, bm.line, M.display_note(bm))
+
+    local file = file_of(bufnr)
+    local orphans = {}
+    for _, bm in ipairs(store.get_all_raw()) do
+      if bm.file == file and stale[bm.id] then
+        orphans[#orphans + 1] = bm
+        if bm.note and bm.annotation_extmark_id then
+          display.hide_annotation(bufnr, bm.annotation_extmark_id)
+          bm.annotation_extmark_id = display.show_annotation(bufnr, bm.line, M.display_note(bm))
+        end
       end
     end
-    if #orphans > 0 then
+    local gen = require('custom.versions').generation(bufnr)
+    if #orphans > 0 and reported[bufnr] ~= gen then
+      reported[bufnr] = gen
       vim.notify(
-        ('haunt: %d annotation%s not re-anchored in %s (kept at old line, marked %s)'):format(
+        ('haunt: %d annotation%s lost %s line in %s (parked, marked %s)'):format(
           #orphans,
           #orphans == 1 and '' or 's',
-          vim.fn.fnamemodify(file_of(bufnr), ':~:.'),
+          #orphans == 1 and 'its' or 'their',
+          vim.fn.fnamemodify(file, ':~:.'),
           vim.trim(STALE_MARK)
         ),
         vim.log.levels.WARN
       )
     end
-    M.capture_buffer(bufnr)
     return ok
   end
 end
 
---- Wrap the serializer so `anchor` reaches the JSON. Its result is
+--- Wrap the serializer so `anchor` and `stale` reach the JSON. Its result is
 --- index-aligned with its input.
 local function install_serializer()
   local persistence = require 'haunt.persistence'
@@ -198,8 +253,9 @@ local function install_serializer()
   persistence._build_serializable = function(bookmarks, project_root)
     local out = build(bookmarks, project_root)
     for i, bm in ipairs(bookmarks) do
-      if out[i] and bm.anchor then
+      if out[i] then
         out[i].anchor = bm.anchor
+        out[i].stale = stale[bm.id] and true or nil
       end
     end
     return out
@@ -217,10 +273,16 @@ function M.install()
   install_serializer()
   install_restore()
 
-  hooks.on_pre_save(capture_loaded)
+  -- haunt saved on its own (a note was made, edited, deleted): the snapshot
+  -- and the washes go out with it, so the three never describe different
+  -- versions. Re-entrant calls from inside persist are dropped there.
+  hooks.on_post_save(function()
+    require('custom.versions').persist()
+  end)
   -- A rewritten note is the user vouching for the line it is on now.
   hooks.on_update(function(ctx)
     stale[ctx.bookmark.id] = nil
+    ctx.bookmark.stale = nil
     if ctx.bufnr then
       M.capture_buffer(ctx.bufnr)
     end
@@ -228,29 +290,6 @@ function M.install()
   hooks.on_delete(function(ctx)
     stale[ctx.bookmark.id] = nil
   end)
-
-  local group = vim.api.nvim_create_augroup('haunt-anchor', { clear = true })
-  vim.api.nvim_create_autocmd('BufReadPre', {
-    group = group,
-    desc = 'haunt: sync and drop marks before the buffer is re-read',
-    callback = function(args)
-      detach(args.buf)
-    end,
-  })
-  -- Capture *and* save: haunt writes its store only after its own mutations
-  -- and at exit, so without this the numbers on disk would lag a re-anchor
-  -- until the next note was touched.
-  vim.api.nvim_create_autocmd('BufWritePost', {
-    group = group,
-    desc = 'haunt: refresh annotation anchors from the written text',
-    callback = function(args)
-      M.capture_buffer(args.buf)
-      local store = require 'haunt.store'
-      if store.has_bookmarks() then
-        store.save()
-      end
-    end,
-  })
 
   vim.api.nvim_create_user_command('HauntMergeBranches', function()
     M.merge_branches()

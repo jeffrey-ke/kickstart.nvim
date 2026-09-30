@@ -14,11 +14,12 @@
 -- only `line,col` -- no file path, no text -- so `:Hi load` replays those
 -- coordinates into whichever buffer happens to be current, on whatever now sits
 -- at those lines. custom/hi_store.lua replaces it: one JSON per file keyed by
--- repo root commit + relative path (so a worktree sees the same washes), each
--- wash anchored by its line text so it finds its line again after a checkout,
--- loaded on BufReadPost and autosaved -- deleting the store when the last wash
--- goes, so an erased wash never comes back. Pattern highlights are not
--- persisted; `:Hi save` still does that by hand if ever wanted.
+-- repo root commit + relative path (so a worktree sees the same washes), with
+-- custom/versions.lua keeping the file text the positions are exact for and
+-- mapping them through the diff when the file changes underneath (a checkout,
+-- a pull, a formatter). Loaded on BufReadPost, autosaved -- deleting the store
+-- when the last wash goes, so an erased wash never comes back. Pattern
+-- highlights are not persisted; `:Hi save` still does that by hand if wanted.
 return {
   'azabiong/vim-highlighter',
   -- Eager: the BufReadPost restore fires for the file passed on the command
@@ -41,19 +42,17 @@ return {
     vim.g.HiErase = '' -- f<BS>
     vim.g.HiClear = '' -- f<C-L>
 
-    local store = function()
-      return require 'custom.hi_store'
-    end
-
     vim.keymap.set('n', '<leader>Hs', function()
-      store().save()
+      require('custom.hi_store').save()
     end, { desc = '[H]ighlights: [s]ave for this file' })
     vim.keymap.set('n', '<leader>Hl', function()
-      store().detach(0)
-      store().load(0, false)
-    end, { desc = '[H]ighlights: re[l]oad for this file' })
+      require('custom.versions').remap(0)
+    end, { desc = "[H]ighlights: re[l]oad this file's marks from disk" })
 
-    store().setup()
+    -- The autocmds that load, detach and persist -- for washes and haunt's
+    -- notes alike -- live in versions.lua, since one snapshot serves both.
+    require('custom.versions').setup()
+    require('custom.hi_store').setup()
   end,
   config = function()
     -- After the plugin is sourced, so this mapping wins the t<CR> slot.

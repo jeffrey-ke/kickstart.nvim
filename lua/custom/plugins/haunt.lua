@@ -13,9 +13,12 @@
 -- haunt itself persists only `{file, line, note, id}` and puts a note back on
 -- that exact line number, so a change made to the file while nvim is not
 -- tracking it (a checkout, a pull, a formatter) would land it on the wrong
--- line. custom/haunt_anchor.lua adds a content anchor to each saved bookmark
--- and looks the line up again before haunt draws it; a line that is gone keeps
--- its old number and shows a `⚠`.
+-- line. custom/versions.lua keeps the file text those numbers were taken from
+-- and, before haunt draws, custom/haunt_anchor.lua pushes each line through
+-- the diff between that text and the buffer -- so a note follows its line
+-- through a checkout the way a review comment follows a push, rewritten line
+-- included. A line that is gone is parked where the deletion happened, shows
+-- a `⚠`, and keeps its text so it snaps back if the line returns.
 --
 -- Upstream suggests `<leader>h` as the prefix; that is taken here twice over
 -- (window-left in lua/keymaps.lua, and which-key's 'Git [H]unk' group), so this

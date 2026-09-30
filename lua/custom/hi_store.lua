@@ -1,43 +1,39 @@
 -- Persistence for vim-highlighter's positional washes, keyed by repo and
--- anchored by content.
+-- carried across versions of the file by custom/versions.lua.
 --
 -- The plugin's own `:Hi save` / `:Hi load` are not used. Its `.hl` format is
--- `%:color,line,col,line,col` and nothing else -- no room for the text that
--- would let a wash find its line again -- and this config used to key those
--- files by the buffer's absolute path, so a worktree of the same repo saw
--- nothing. A wash, though, is only an extmark in the plugin's `HiColor`
+-- `%:color,line,col,line,col` and nothing else, and this config used to key
+-- those files by the buffer's absolute path, so a worktree of the same repo
+-- saw nothing. A wash, though, is only an extmark in the plugin's `HiColor`
 -- namespace with `{end_row, end_col, hl_group = 'HiColorN'}`, and the plugin
 -- keeps no side table: it enumerates the namespace for save, erase (`f<BS>`)
 -- and the `Hi{}` jumps. A mark placed here with the same shape is therefore
 -- indistinguishable from one it made, and everything of the plugin's keeps
 -- working on it. Verified against 1.64.1.
 --
--- Store: one JSON per file under
---   stdpath('data')/highlighter/<root commit, 12 hex>/<path relative to repo root, / -> %>.json
--- (`_abs/<absolute path>` for a file outside any repo). The root commit is what
--- every clone and worktree of a repo shares, and what haunt keys its notes by
--- too, so a note and its wash travel together. The root is found from the
--- buffer's own path, not nvim's cwd, so `:cd` elsewhere changes nothing.
+-- Store: one JSON per file under `stdpath('data')/highlighter/<file key>.json`,
+-- the key being `versions.file_key` (root commit + relative path). Each record
+-- is `{color, l1, c1, l2, c2, anchor, end_anchor}` -- the extmark as it was
+-- (0-based, end exclusive) against the file's snapshot, plus the text of each
+-- end for the one case a diff cannot answer, a deleted range. On load the
+-- ends are mapped through the snapshot -> buffer diff; a range that was
+-- deleted is parked where the deletion happened, flagged *stale*, and keeps
+-- its original anchors through later saves so it can snap back when the text
+-- reappears.
 --
--- Each record is `{color, l1, c1, l2, c2, anchor, end_anchor}` -- the extmark
--- as it was (0-based, end exclusive) plus a content anchor for each end
--- (custom/anchor.lua). On load the span is looked up by content; the old
--- numbers are the fallback, clamped, and such a wash is *stale*: its stored
--- record is kept verbatim through later saves, so the text it is looking for
--- survives until it reappears or the wash is erased.
---
--- Loading is tied to `BufReadPost`, with the namespace cleared on
--- `BufReadPre`: a reload leaves extmarks frozen at their old rows rather than
--- moving or dropping them, so the old `BufWinEnter` + `b:hi_restored` guard
--- meant a checkout under an open buffer kept the wrong rows and then saved
--- them. Pattern highlights (`f<CR>`, window matches) are not persisted any
--- more; the plugin's own `:Hi save` still does that by hand.
+-- Loading happens on `BufReadPost` with the namespace cleared on `BufReadPre`
+-- (versions.lua owns those autocmds): a reload leaves extmarks frozen at
+-- their old rows rather than moving or dropping them. Pattern highlights
+-- (`f<CR>`, window matches) are not persisted; the plugin's own `:Hi save`
+-- still does that by hand.
 local M = {}
 
 local NS_NAME = 'HiColor'
 
---- bufnr -> { [extmark_id] = record } for washes whose anchor was not found.
+--- bufnr -> { [extmark_id] = record } for washes whose range is gone.
 local stale = {}
+--- bufnr -> true once a load ran, which is what allows pruning the store.
+local loaded = {}
 
 local function ns()
   -- Named, so this is the plugin's own id whichever side creates it first.
@@ -48,56 +44,36 @@ local function anchor()
   return require 'custom.anchor'
 end
 
+local function versions()
+  return require 'custom.versions'
+end
+
 local function base_dir()
   return vim.fs.joinpath(vim.fn.stdpath 'data', 'highlighter')
 end
 
--- ---------------------------------------------------------------------------
--- Keys
--- ---------------------------------------------------------------------------
+local function real(bufnr)
+  return (bufnr == nil or bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
+end
 
---- git root -> root commit, or false for a repo with no commits yet.
-local pid_cache = {}
-
----@param root string
----@return string|false
-local function project_id(root)
-  local pid = pid_cache[root]
-  if pid == nil then
-    local r = vim.system({ 'git', '-C', root, 'rev-list', '--max-parents=0', 'HEAD' }, { text = true }):wait()
-    pid = r.code == 0 and vim.split(r.stdout, '\n')[1] or ''
-    pid = pid ~= '' and pid or false
-    pid_cache[root] = pid
-  end
-  return pid
+local function clamp(v, lo, hi)
+  return math.max(lo, math.min(v, hi))
 end
 
 --- The store file for an absolute path.
 ---@param path string
----@return string
+---@return string|nil
 function M.path_for_file(path)
-  path = vim.fs.normalize(path)
-  local root = vim.fs.root(path, '.git')
-  local pid = root and project_id(root)
-  local dir, rel
-  if pid then
-    dir, rel = pid:sub(1, 12), path:sub(#root + 2)
-  else
-    dir, rel = '_abs', path:gsub('^/', '')
-  end
-  return vim.fs.joinpath(base_dir(), dir, (rel:gsub('/', '%%')) .. '.json')
+  local key = versions().file_key(path)
+  return key and vim.fs.joinpath(base_dir(), key .. '.json') or nil
 end
 
 --- The store file for a buffer, or nil for anything not a real file.
 ---@param bufnr? integer
 ---@return string|nil
 function M.path_for_buf(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local name = vim.api.nvim_buf_get_name(bufnr)
-  if name == '' or vim.bo[bufnr].buftype ~= '' then
-    return nil
-  end
-  return M.path_for_file(name)
+  local key = versions().buf_key(bufnr)
+  return key and vim.fs.joinpath(base_dir(), key .. '.json') or nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -140,8 +116,15 @@ end
 ---@param bufnr? integer
 ---@return boolean
 function M.has_highlights(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  return #vim.api.nvim_buf_get_extmarks(bufnr, ns(), 0, -1, { limit = 1 }) > 0
+  return #vim.api.nvim_buf_get_extmarks(real(bufnr), ns(), 0, -1, { limit = 1 }) > 0
+end
+
+--- An anchor for a wash end: the line's text plus the column, so a range
+--- that snaps back after a deletion gets its original width back.
+local function end_anchor(lines, row, col)
+  local a = anchor().capture(lines, row + 1)
+  a.col = col
+  return a
 end
 
 ---@param bufnr integer
@@ -153,9 +136,17 @@ local function records_of(bufnr)
   for _, w in ipairs(washes(bufnr)) do
     local rec = kept[w.id]
     if rec then
-      -- Verbatim, except a recolor is real and should stick.
-      rec.color = w.color
-      out[#out + 1] = rec
+      -- Where it is parked now, with the anchors of where it was.
+      out[#out + 1] = {
+        color = w.color,
+        l1 = w.row,
+        c1 = w.col,
+        l2 = w.end_row,
+        c2 = w.end_col,
+        anchor = rec.anchor,
+        end_anchor = rec.end_anchor,
+        stale = true,
+      }
     elseif not (w.row == w.end_row and w.end_col <= w.col) then
       -- Zero-width marks are what edits leave behind; the plugin's own jump
       -- deletes them on sight, so they are not worth carrying.
@@ -165,8 +156,8 @@ local function records_of(bufnr)
         c1 = w.col,
         l2 = w.end_row,
         c2 = w.end_col,
-        anchor = anchor().capture(lines, w.row + 1),
-        end_anchor = anchor().capture(lines, w.end_row + 1),
+        anchor = end_anchor(lines, w.row, w.col),
+        end_anchor = end_anchor(lines, w.end_row, w.end_col),
       }
     end
   end
@@ -174,26 +165,31 @@ local function records_of(bufnr)
 end
 
 --- Write the buffer's washes, or delete the store when none are left, so an
---- erased wash never comes back. Silent -- for autocmds and hot paths.
----@param bufnr? integer
-function M.autosave(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  -- Between BufReadPre and BufReadPost the namespace is deliberately empty.
-  if vim.b[bufnr].hi_detached then
-    return
-  end
+--- erased wash never comes back. Returns whether anything was written.
+--- Called by `versions.persist`, which pairs it with the snapshot.
+---@param bufnr integer
+---@return boolean
+function M.write(bufnr)
   local path = M.path_for_buf(bufnr)
   if not path then
-    return
+    return false
   end
   local records = records_of(bufnr)
   if #records > 0 then
     write_store(path, records)
+    return true
+  end
   -- Only prune once a load has run for this buffer. Deleting on the strength
   -- of an empty buffer that was never restored would discard the store.
-  elseif vim.b[bufnr].hi_load_ok and vim.uv.fs_stat(path) then
+  if loaded[bufnr] and vim.uv.fs_stat(path) then
     vim.fn.delete(path)
   end
+  return false
+end
+
+--- Persist the current buffer's marks. Silent -- for the mutating keys.
+function M.autosave()
+  versions().persist(0)
 end
 
 --- Manual save, with a message. `<leader>Hs`.
@@ -202,142 +198,145 @@ function M.save()
   if not path then
     return vim.notify('highlighter: buffer has no file to key highlights to', vim.log.levels.WARN)
   end
-  M.autosave()
+  versions().persist(0)
   vim.notify(
     M.has_highlights() and ('highlighter: saved -> ' .. vim.fn.fnamemodify(path, ':~')) or 'highlighter: no highlights, store cleared',
     vim.log.levels.INFO
   )
 end
 
---- Forget the buffer's marks ahead of a re-read. See the header.
+--- Forget the buffer's marks ahead of a re-read.
 ---@param bufnr integer
 function M.detach(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, ns(), 0, -1)
   stale[bufnr] = nil
-  vim.b[bufnr].hi_detached = true
 end
 
---- Place one record, resolving its ends by content. Returns the extmark id
---- and whether the record had to fall back to its old numbers.
----@return integer|nil id, boolean is_stale
-local function place(bufnr, lines, rec)
-  local s, e, exact
-  if rec.anchor and rec.end_anchor then
-    s, e, exact = anchor().resolve_span(lines, rec.anchor, rec.end_anchor, rec.l1 + 1, rec.l2 + 1)
+--- Place one record. Returns 'ok', 'stale', or nil when it could not be set.
+---@param bufnr integer
+---@param lines string[]
+---@param rec table
+---@param mapper annot.Mapper|nil  nil when the file has no snapshot yet
+---@return 'ok'|'stale'|nil
+local function place(bufnr, lines, rec, mapper)
+  local n = #lines
+  local s, e, c1, c2, is_stale
+
+  --- The one text lookup: the range as it was, wherever it is now.
+  local function resurrect()
+    if not (rec.anchor and rec.end_anchor) then
+      return false
+    end
+    local rs, re, exact = anchor().resolve_span(lines, rec.anchor, rec.end_anchor, rec.l1 + 1, rec.l2 + 1)
+    if not rs then
+      return false
+    end
+    s, e = rs, re
+    c1 = rec.anchor.col or rec.c1
+    c2 = rec.end_anchor.col or rec.c2
+    is_stale = not exact
+    return true
   end
-  -- A store written before anchors existed keeps its numbers, un-flagged.
-  local is_stale = rec.anchor ~= nil and not exact
-  if not s then
-    s = math.max(1, math.min(rec.l1 + 1, #lines))
-    e = math.max(s, math.min(rec.l2 + 1, #lines))
+
+  --- Parked on a line, whole: visible, and nothing to mistake for the range.
+  local function park(line)
+    s, e = line, line
+    c1, c2 = 0, #lines[line]
+    is_stale = true
   end
-  local c1 = math.min(rec.c1, #(lines[s] or ''))
-  local c2 = math.min(rec.c2, #(lines[e] or ''))
-  if s == e and c2 <= c1 then
-    return nil, is_stale
+
+  if rec.stale then
+    if not resurrect() then
+      park(mapper and mapper.line(rec.l1 + 1) or clamp(rec.l1 + 1, 1, n))
+    end
+  elseif mapper then
+    local ks, ke
+    s, c1, ks = mapper.pos(rec.l1 + 1, rec.c1, false)
+    e, c2, ke = mapper.pos(rec.l2 + 1, rec.c2, true)
+    if ks == 'deleted' and ke == 'deleted' then
+      if not resurrect() then
+        park(s)
+      end
+    else
+      -- One end fell into a deletion right next to the other: shrink to it.
+      if e < s then
+        e, c2 = s, #lines[s]
+      end
+      is_stale = false
+    end
+  else
+    -- A store from before snapshots existed: text anchors, else the numbers.
+    if not resurrect() then
+      s = clamp(rec.l1 + 1, 1, n)
+      e = clamp(rec.l2 + 1, s, n)
+      c1, c2 = rec.c1, rec.c2
+      is_stale = rec.anchor ~= nil
+    end
+  end
+
+  c1 = clamp(c1, 0, #lines[s])
+  c2 = clamp(c2, 0, #lines[e])
+  if s == e and c2 < c1 then
+    c1, c2 = c2, c1
   end
   local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns(), s - 1, c1, {
     end_row = e - 1,
     end_col = c2,
     hl_group = 'HiColor' .. rec.color,
   })
-  return ok and id or nil, is_stale
+  if not ok then
+    return nil
+  end
+  if is_stale then
+    stale[bufnr][id] = rec
+    return 'stale'
+  end
+  return 'ok'
 end
 
---- Restore the buffer's washes. Sets `b:hi_load_ok`, which gates pruning.
----@param bufnr? integer
----@param quiet? boolean
-function M.load(bufnr, quiet)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  vim.b[bufnr].hi_detached = nil
+--- Bring the buffer's washes in from disk. Called by `versions.ensure_mapped`
+--- with the buffer's lines and the mapper from the snapshot (nil if none).
+---@param bufnr integer
+---@param lines string[]
+---@param mapper annot.Mapper|nil
+function M.load(bufnr, lines, mapper)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns(), 0, -1)
+  stale[bufnr] = {}
+  loaded[bufnr] = true
   local path = M.path_for_buf(bufnr)
   if not path then
     return
   end
   local data = read_store(path)
   if not data then
-    -- Nothing saved is a legitimate "loaded" state: an empty buffer is then
-    -- known-good, and autosave may prune later.
-    vim.b[bufnr].hi_load_ok = true
-    if not quiet then
-      vim.notify('highlighter: nothing saved for this file', vim.log.levels.INFO)
-    end
     return
   end
   -- The `HiColorN` groups only exist once the plugin has run `s:Load()`.
   require('custom.annot').ensure_loaded()
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  stale[bufnr] = {}
   local n_stale = 0
   for _, rec in ipairs(data.marks) do
-    local id, is_stale = place(bufnr, lines, rec)
-    if id and is_stale then
-      stale[bufnr][id] = rec
+    if place(bufnr, lines, rec, mapper) == 'stale' then
       n_stale = n_stale + 1
     end
   end
-  vim.b[bufnr].hi_load_ok = true
   if n_stale > 0 then
     vim.notify(
-      ('highlighter: %d wash%s not re-anchored in %s (kept at old lines)'):format(
+      ('highlighter: %d wash%s lost %s range in %s (parked, kept)'):format(
         n_stale,
         n_stale == 1 and '' or 'es',
+        n_stale == 1 and 'its' or 'their',
         vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ':~:.')
       ),
       vim.log.levels.WARN
     )
-  elseif not quiet then
-    vim.notify(('highlighter: loaded %d'):format(#data.marks), vim.log.levels.INFO)
   end
 end
 
---- Autocmds. Called from the plugin spec's `init`.
+--- Commands. Autocmds live in versions.lua.
 function M.setup()
-  local group = vim.api.nvim_create_augroup('highlighter-persist', { clear = true })
-  vim.api.nvim_create_autocmd('BufReadPre', {
-    group = group,
-    desc = 'Drop washes before the buffer is re-read',
-    callback = function(args)
-      M.detach(args.buf)
-    end,
-  })
-  vim.api.nvim_create_autocmd('BufReadPost', {
-    group = group,
-    desc = 'Restore saved washes for this file',
-    callback = function(args)
-      M.load(args.buf, true)
-    end,
-  })
-  -- Adds and deletes made through our own keys already write through; these
-  -- catch the rest (`:Hi` used directly, edits that moved a wash).
-  vim.api.nvim_create_autocmd({ 'BufWinLeave', 'BufWritePost' }, {
-    group = group,
-    desc = 'Save washes for this file',
-    callback = function(args)
-      M.autosave(args.buf)
-    end,
-  })
-  vim.api.nvim_create_autocmd('VimLeavePre', {
-    group = group,
-    desc = 'Save washes in every buffer before quitting',
-    callback = function()
-      for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(bufnr) then
-          M.autosave(bufnr)
-        end
-      end
-    end,
-  })
-  vim.api.nvim_create_autocmd('BufWipeout', {
-    group = group,
-    callback = function(args)
-      stale[args.buf] = nil
-    end,
-  })
-
   vim.api.nvim_create_user_command('AnnotMigrateHl', function()
     M.migrate_hl()
-  end, { desc = "Convert vim-highlighter's old per-path .hl stores to the anchored per-repo store" })
+  end, { desc = "Convert vim-highlighter's old per-path .hl stores to the per-repo store" })
 end
 
 -- ---------------------------------------------------------------------------
@@ -371,8 +370,8 @@ function M.migrate_hl()
               c1 = c1,
               l2 = l2,
               c2 = c2,
-              anchor = anchor().capture(lines, l1 + 1),
-              end_anchor = anchor().capture(lines, l2 + 1),
+              anchor = end_anchor(lines, l1, c1),
+              end_anchor = end_anchor(lines, l2, c2),
             }
           end
         end
@@ -380,7 +379,7 @@ function M.migrate_hl()
       local target = M.path_for_file(path)
       -- Two worktrees' copies of one file land on one key: append, minus
       -- exact duplicates.
-      local existing = read_store(target)
+      local existing = target and read_store(target)
       local marks = existing and existing.marks or {}
       local seen = {}
       for _, r in ipairs(marks) do
@@ -395,14 +394,14 @@ function M.migrate_hl()
           added = added + 1
         end
       end
-      if #marks > 0 then
+      if target and #marks > 0 then
         write_store(target, marks)
       end
       os.rename(hl, hl .. '.bak')
       if vim.uv.fs_stat(hl .. '.o') then
         os.rename(hl .. '.o', hl .. '.o.bak')
       end
-      report[#report + 1] = ('%d wash%s: %s -> %s'):format(added, added == 1 and '' or 'es', tag, vim.fn.fnamemodify(target, ':~'))
+      report[#report + 1] = ('%d wash%s: %s -> %s'):format(added, added == 1 and '' or 'es', tag, vim.fn.fnamemodify(target or '?', ':~'))
     end
   end
   if #report == 0 then
