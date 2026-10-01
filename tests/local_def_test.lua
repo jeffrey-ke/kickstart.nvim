@@ -534,6 +534,23 @@ do
     { filename = 'notes.md', lnum = 3, col = 1, text = 'F(' },
     { filename = '/r/f.cc', lnum = 1, col = 1, text = line('/r/f.cc', 0) },
   }
+  local member = 'class B {\n  const Map& GetAll() const {\n    return m_;\n  }\n  const T& Get(int id) const;\n};\n'
+  local munit = { path = '/r/b.h', root = vim.treesitter.get_string_parser(member, 'cpp'):parse()[1]:root(), source = member }
+  local mline = vim.split(member, '\n')
+  check('rank: an inline member function is a definition', rank.kind(munit, 1, mline[2], 'GetAll'), 'definition')
+  check('rank: a member prototype is a declaration', rank.kind(munit, 4, mline[5], 'Get'), 'declaration')
+
+  local statements = {
+    { filename = '/r/f.cc', lnum = 3, col = 1, text = '  return F(x);' },
+    { filename = '/r/f.cc', lnum = 4, col = 1, text = '  else F();' },
+    { filename = '/r/f.h', lnum = 1, col = 1, text = '  size_t F(int x);' },
+    { filename = '/r/f.cc', lnum = 5, col = 1, text = '  returned_value F(int x);' },
+    { filename = 'notes.md', lnum = 1, col = 1, text = '  return F(x)' },
+  }
+  check('rank: statement-keyword lines dropped, in C/C++ only', vim.tbl_map(function(l)
+    return l.text
+  end, rank.without_statements(statements)), { '  size_t F(int x);', '  returned_value F(int x);', '  return F(x)' })
+
   check('rank: definitions, then the rest, then declarations', vim.tbl_map(function(l)
     return l.filename
   end, rank.definitions_first(hits, 'F', load)), { '/r/f.cc', 'notes.md', '/r/f.h' })

@@ -519,12 +519,21 @@ end
 
 -- A `.h` is filetype `c` or `cpp` depending on detection, and rg's `c` type does
 -- not cover `*.cc` -- pass both so a search started in a header still reaches the
--- definition in the source file. The second alternative catches type
--- declarations, whose name is never followed by `(`; `[^;]*$` drops forward
--- declarations like `class Foo;`.
+-- definition in the source file. Three alternatives:
+--   1. A function at column 0: a free function, or a method defined out of line.
+--   2. A type, whose name is never followed by `(`; `[^;]*$` drops forward
+--      declarations like `class Foo;`. Indented too, for a nested type.
+--   3. A member declared or defined inside a class body, which Google style
+--      indents: `  const Map& GetAll() const {`. Only a type may stand between
+--      the indent and the name -- no `.`, `->`, `=` or `(` -- so a call like
+--      `x.F()` or `y = F()` does not match. A constructor with no prefix
+--      (`  Foo(int);`) is left out: it reads exactly like a call statement.
+-- The statement keywords alternative 3 still admits (`return F(x);`) are
+-- dropped after the search by rank.without_statements; excluding them here
+-- needs a lookahead, which costs PCRE2 and ~3x the search time.
 local cpp_definition = {
   types = { 'c', 'cpp' },
-  pattern = [[^([\w:<>~].*\bNAME\s*\(|(class|struct|union|enum(\s+class)?)\s+NAME\b[^;]*$)]],
+  pattern = [=[^([\w:<>~].*\bNAME\s*\(|\s*(class|struct|union|enum(\s+class)?)\s+NAME\b[^;]*$|\s+[\w:\[][\w:<>,&*\[\] ]*[\w>&*\]][\s&*]+~?NAME\s*\()]=],
 }
 
 -- A definition pattern encodes a language's formatting convention, not its
@@ -576,7 +585,8 @@ end
 -- sorts ahead of its declaration in the header, which stays one `]l` away.
 local function bodies_first(word)
   return function(found)
-    return require('custom.local_def.rank').definitions_first(found, word, require('custom.local_def.disk').load)
+    local rank = require 'custom.local_def.rank'
+    return rank.definitions_first(rank.without_statements(found), word, require('custom.local_def.disk').load)
   end
 end
 

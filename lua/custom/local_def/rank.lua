@@ -66,6 +66,24 @@ function M.kind(unit, row, line, name)
   end
 end
 
+-- A C/C++ line opening with one of these is a statement, not a declaration,
+-- whatever follows: `return F(x);`, `else F();`, `throw Error(msg);`.
+local statement_keywords = {}
+for _, kw in ipairs { 'return', 'else', 'throw', 'delete', 'new', 'case', 'goto', 'co_return', 'co_yield', 'co_await', 'using', 'typedef' } do
+  statement_keywords[kw] = true
+end
+
+--- Pure. Locations without the C/C++ hits whose line opens with a statement
+--- keyword -- the calls the indented-member grep pattern cannot exclude by
+--- itself. Hits in other files are kept as they are.
+function M.without_statements(locations)
+  return vim.tbl_filter(function(location)
+    local ext = location.filename and location.filename:match '%.(%w+)$'
+    local first = (location.text or ''):match '^%s*([%w_]+)'
+    return not (ext and CPP_EXTENSIONS[ext] and statement_keywords[first])
+  end, locations)
+end
+
 --- Locations (see custom.locations) reordered: definitions first, then hits
 --- that are neither or are not C/C++, then declarations. Order within each
 --- group is kept, and nothing is dropped -- the declaration stays one `]l`
