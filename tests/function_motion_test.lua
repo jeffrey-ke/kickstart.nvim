@@ -95,6 +95,31 @@ case('python: 2[f walks out to the enclosing def', 'python', py, 'return 1', '2[
 case('python: [f to a method', 'python', py, 'return 2', '[f', 'def method(self):')
 case('python: ]f from outer lands on the method', 'python', py, 'return inner', ']f', 'def method(self):')
 
+--- Like `case`, but `keys` is an operator + motion; report what it yanked.
+local function yank_case(label, filetype, src, from, keys, want)
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_current_buf(bufnr)
+  local lines = vim.split(vim.trim(src), '\n')
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].filetype = filetype
+  motion.setup()
+  for row, line in ipairs(lines) do
+    local col = line:find(from, 1, true)
+    if col then
+      vim.api.nvim_win_set_cursor(0, { row, col - 1 })
+      break
+    end
+  end
+  vim.fn.setreg('"', '')
+  vim.cmd('normal ' .. keys)
+  check(label, vim.fn.getreg '"', want)
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+end
+
+yank_case('python: y[f yanks back to the def, exclusive', 'python', py, 'return 1', 'y[f', 'def inner():\n        ')
+yank_case('python: y]f yanks forward to the next def', 'python', py, 'return inner', 'y]f', 'return inner\n\nclass K:\n    ')
+yank_case('python: y2[f takes a count', 'python', py, 'return 1', 'y2[f', 'def outer():\n    def inner():\n        ')
+
 case('unsupported filetype is a no-op', 'text', 'just\nsome text', 'some', '[f', 'some text')
 
 print(('%d/%d passed'):format(count - failures, count))

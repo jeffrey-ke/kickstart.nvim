@@ -10,7 +10,8 @@
 -- enclosing function (a nested Python def); outside every function, to the
 -- nearest function start above -- nested or not, mirroring `]f`, which goes to
 -- the nearest start below. So repeating `[f` walks outward, then backward.
--- Both take a count and leave a jumplist entry.
+-- Both take a count and leave a jumplist entry, and work after an operator
+-- (`y[f`, `d]f`) as exclusive charwise motions.
 
 local M = {}
 
@@ -107,10 +108,10 @@ function M.jump(direction)
 end
 
 function M.setup()
-  vim.keymap.set({ 'n', 'x' }, '[f', function()
+  vim.keymap.set({ 'n', 'x', 'o' }, '[f', function()
     M.jump(-1)
   end, { desc = 'Start of enclosing / previous function definition' })
-  vim.keymap.set({ 'n', 'x' }, ']f', function()
+  vim.keymap.set({ 'n', 'x', 'o' }, ']f', function()
     M.jump(1)
   end, { desc = 'Start of next function definition' })
 end
