@@ -1,7 +1,7 @@
--- Tests for lua/custom/notebook_cells.lua. Run from anywhere (NVIM_APPNAME picks the data
--- dir whose nvim-treesitter has the python parser):
+-- Tests for lua/custom/notebook_cells.lua. Run from anywhere (stdpath('data') must hold
+-- nvim-treesitter's python parser):
 --
---   NVIM_APPNAME=nvim-notebook nvim --headless -u NONE -l ~/.config/nvim-notebook/tests/notebook_cells_test.lua
+--   nvim --headless -u NONE -l ~/dotfiles/nvim/tests/notebook_cells_test.lua
 
 local config = vim.fs.dirname(vim.fs.dirname(vim.fs.normalize(debug.getinfo(1, 'S').source:sub(2))))
 vim.opt.rtp:prepend(config)

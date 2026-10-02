@@ -58,9 +58,19 @@ return {
       if vim.env.TMUX and vim.env.TMUX_PANE then
         vim.system { 'tmux', 'set', '-p', '-t', vim.env.TMUX_PANE, 'allow-passthrough', 'all' }
       end
+
+      -- :Ker [url | port] -- :MoltenInit on a Jupyter server: the default one with no
+      -- argument, a bare port on this machine, or any URL (a `?token=` rides along).
+      vim.api.nvim_create_user_command('Ker', function(command)
+        local target = command.args ~= '' and command.args or server_url
+        if target:match '^%d+$' then
+          target = 'http://127.0.0.1:' .. target
+        end
+        vim.cmd.MoltenInit(target)
+      end, { nargs = '?', desc = 'Start a kernel on a Jupyter server: URL, local port, or the default' })
     end,
     keys = {
-      { '<leader>ei', '<cmd>MoltenInit ' .. server_url .. '<cr>', desc = 'Notebook: start kernel on the server' },
+      { '<leader>ei', '<cmd>Ker<cr>', desc = 'Notebook: start kernel on the server' },
       { '<leader>eo', '<cmd>noautocmd MoltenEnterOutput<cr>', desc = 'Notebook: enter output window' },
       { '<leader>eh', '<cmd>MoltenHideOutput<cr>', desc = 'Notebook: hide output' },
       { '<leader>ed', '<cmd>MoltenDelete<cr>', desc = 'Notebook: delete cell output' },
