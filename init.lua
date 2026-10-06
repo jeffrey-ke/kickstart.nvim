@@ -1091,12 +1091,6 @@ require('lazy').setup({
         },
       }
 
-      -- LSP servers and clients are able to communicate to each other what features they support.
-      --  By default, Neovim doesn't support everything that is in the LSP specification.
-      --  When you add blink.cmp, luasnip, etc. Neovim now has *more* capabilities.
-      --  So, we create new capabilities with blink.cmp, and then broadcast that to the servers.
-      local capabilities = require('blink.cmp').get_lsp_capabilities()
-
       -- Enable the following language servers
       --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
       --
@@ -1107,26 +1101,7 @@ require('lazy').setup({
       --  - settings (table): Override the default settings passed when initializing the server.
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
-        clangd = {
-          cmd = {
-            'clangd',
-            '--background-index',
-            '--clang-tidy',
-            '--header-insertion=iwyu',
-            '--completion-style=detailed',
-            '--function-arg-placeholders',
-            '--fallback-style=llvm',
-          },
-          init_options = {
-            usePlaceholders = true,
-            completeUnimported = true,
-            clangdFileStatus = true,
-          },
-          root_dir = function(fname)
-            return require('lspconfig.util').root_pattern('Makefile', 'configure.in', 'configure.ac', '.git')(fname)
-              or require('lspconfig.util').path.dirname(fname)
-          end,
-        },
+        clangd = {},
         -- gopls = {},
         -- pyright = {},
         bashls = {},
@@ -1178,16 +1153,9 @@ require('lazy').setup({
       require('mason-lspconfig').setup {
         ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
         automatic_installation = false,
-        handlers = {
-          function(server_name)
-            local server = servers[server_name] or {}
-            -- This handles overriding only values explicitly passed
-            -- by the server configuration above. Useful when disabling
-            -- certain features of an LSP (for example, turning off formatting for ts_ls)
-            server.capabilities = vim.tbl_deep_extend('force', {}, capabilities, server.capabilities or {})
-            require('lspconfig')[server_name].setup(server)
-          end,
-        },
+        -- Without a compile_commands.json clangd can't resolve the monorepo's includes, so it
+        -- only adds noise; gD finds C++ definitions by grep. :ToggleClangd starts it on demand.
+        automatic_enable = { exclude = { 'clangd' } },
       }
 
       -- Safety autocommand to detach clangd from git buffers if it somehow attaches
@@ -1199,8 +1167,10 @@ require('lazy').setup({
           local filetype = vim.bo[bufnr].filetype
           local buftype = vim.bo[bufnr].buftype
 
-          -- Check if this is a git buffer that clangd shouldn't handle
-          local is_git_buffer = bufname:match '^fugitive://'
+          -- Check if this is a git buffer that clangd shouldn't handle. Any `scheme://` name
+          -- (fugitive://, octo:// review diffs, ...) counts: clangd rejects non-file URIs, and
+          -- every CursorHold documentHighlight on such a buffer pops an error.
+          local is_git_buffer = bufname:match '^%a[%w+.-]*://'
             or vim.tbl_contains({ 'fugitive', 'fugitiveblame', 'git', 'gitcommit', 'gitrebase', 'gitconfig' }, filetype)
             or buftype ~= ''
             or bufname:match '/.git/'
@@ -1217,30 +1187,12 @@ require('lazy').setup({
       })
 
       -- Toggle clangd LSP command
+      -- Enabling attaches to already-open C/C++ buffers as well as later ones; disabling
+      -- stops the server.
       vim.api.nvim_create_user_command('ToggleClangd', function()
-        local clients = vim.lsp.get_clients { name = 'clangd' }
-
-        if #clients > 0 then
-          -- Clangd is running, stop it
-          for _, client in pairs(clients) do
-            vim.lsp.stop_client(client.id)
-          end
-          vim.notify('Clangd stopped', vim.log.levels.INFO)
-        else
-          -- Clangd is not running, start it
-          local bufnr = vim.api.nvim_get_current_buf()
-          local filetype = vim.bo[bufnr].filetype
-
-          if filetype == 'c' or filetype == 'cpp' or filetype == 'objc' or filetype == 'objcpp' then
-            require('lspconfig').clangd.setup(servers.clangd or {})
-            vim.defer_fn(function()
-              vim.cmd 'LspStart clangd'
-            end, 100)
-            vim.notify('Clangd started', vim.log.levels.INFO)
-          else
-            vim.notify('Not a C/C++ file', vim.log.levels.WARN)
-          end
-        end
+        local enable = not vim.lsp.is_enabled 'clangd'
+        vim.lsp.enable('clangd', enable)
+        vim.notify(enable and 'Clangd enabled' or 'Clangd stopped', vim.log.levels.INFO)
       end, { desc = 'Toggle clangd LSP on/off' })
     end,
   },
