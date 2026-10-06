@@ -77,6 +77,49 @@ function M.is_notebook(buf)
   return vim.api.nvim_buf_get_name(buf):match '%.ipynb$' ~= nil
 end
 
+--- Where buffer lines [first, last] sit in the notebook the way Claude Code reads a .ipynb:
+--- cells are `cell-<i>`, counted from 0 without jupytext's header, and lines count from 1
+--- within a cell's source, which has no `# %%` marker and no `# ` on markdown lines. A
+--- single line also carries its first 60 characters, which still find it after cells move.
+--- nil when `first` is in the header, which is notebook metadata rather than a cell.
+---@param lines string[]
+---@param first integer
+---@param last integer
+---@return string?
+function M.claude_ref(lines, first, last)
+  local cells = vim.tbl_filter(function(cell) return cell.kind ~= 'header' end, M.parse(lines))
+  local function locate(lnum)
+    for i = #cells, 1, -1 do
+      local cell = cells[i]
+      if cell.first <= lnum then
+        -- the marker reads as the cell's first line, a trailing blank line as its last
+        return i - 1, math.max(1, math.min(lnum, cell.last) - cell.first), cell
+      end
+    end
+  end
+  local first_cell, first_line, cell = locate(first)
+  local last_cell, last_line = locate(last)
+  if not first_cell then
+    return nil
+  end
+  if first_cell ~= last_cell then
+    return ('cell-%d line %d to cell-%d line %d'):format(first_cell, first_line, last_cell, last_line)
+  end
+  if first_line ~= last_line then
+    return ('cell-%d lines %d-%d'):format(first_cell, first_line, last_line)
+  end
+  local ref = ('cell-%d line %d'):format(first_cell, first_line)
+  local text = cell.first + first_line <= cell.last and lines[cell.first + first_line] or ''
+  if cell.kind == 'markdown' then
+    text = text:gsub('^# ?', '')
+  end
+  text = vim.trim(text)
+  if vim.fn.strchars(text) > 60 then
+    text = vim.fn.strcharpart(text, 0, 60) .. '…'
+  end
+  return text == '' and ref or ('%s: `%s`'):format(ref, text)
+end
+
 ---@type table<integer, { tick: integer, cells: NotebookCell[], cell_at: table<integer, integer>, shape: string }>
 local cache = {}
 

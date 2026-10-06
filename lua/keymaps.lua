@@ -284,22 +284,35 @@ vim.keymap.set('n', '<leader>k', '<C-w><C-k>', { desc = 'Move focus to the upper
 
 vim.keymap.set('n', '<leader>ti', '$a#type: ignore<Esc>', { desc = 'Insert #type: ignore on the line' })
 
-vim.keymap.set('n', '<leader>yr', function()
+local function claude_ref(start_line, end_line)
   local file = vim.fn.expand '%:.'
+  -- A notebook buffer shows jupytext's script, but Claude Code reads the .ipynb as cells, so
+  -- point at a cell instead of a line. No `@`: that would attach the whole notebook,
+  -- outputs and images included.
+  local cells = require 'custom.notebook_cells'
+  if cells.is_notebook(0) then
+    local where = cells.claude_ref(vim.api.nvim_buf_get_lines(0, 0, -1, false), start_line, end_line)
+    if where then
+      return file .. ' ' .. where
+    end
+  end
+  return '@' .. file .. '#L' .. (start_line == end_line and start_line or start_line .. '-' .. end_line)
+end
+
+vim.keymap.set('n', '<leader>yr', function()
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local ref = '@' .. file .. '#L' .. line
+  local ref = claude_ref(line, line)
   vim.fn.setreg('+', ref)
   vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
-end, { desc = 'Yank Claude Code file reference (@file#Lnum)' })
+end, { desc = 'Yank Claude Code file reference (@file#Lnum; notebook cell and line)' })
 
 vim.keymap.set('v', '<leader>yr', function()
-  local file = vim.fn.expand '%:.'
   local start_line = vim.fn.line 'v'
   local end_line = vim.fn.line '.'
   if start_line > end_line then
     start_line, end_line = end_line, start_line
   end
-  local ref = '@' .. file .. '#L' .. start_line .. '-' .. end_line
+  local ref = claude_ref(start_line, end_line)
   vim.fn.setreg('+', ref)
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
   vim.notify('Copied: ' .. ref, vim.log.levels.INFO)

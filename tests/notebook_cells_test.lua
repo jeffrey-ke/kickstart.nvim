@@ -58,6 +58,16 @@ check('parse: an empty cell keeps its marker', cells.parse { '# %%', '', '# %%' 
   { kind = 'code', first = 3, last = 3, number = 2 },
 })
 
+check('ref: a code line, cells counted from 0 without the header', cells.claude_ref(fixture, 12, 12), 'cell-1 line 2: `x = 1`')
+check('ref: a markdown line without its `# `', cells.claude_ref(fixture, 6, 6), 'cell-0 line 1: `# Title`')
+check('ref: an empty markdown line has no text', cells.claude_ref(fixture, 7, 7), 'cell-0 line 2')
+check('ref: the marker is the first line', cells.claude_ref(fixture, 10, 10), 'cell-1 line 1: `def f():`')
+check('ref: the blank line after a cell is its last', cells.claude_ref(fixture, 14, 14), 'cell-1 line 3: `return x`')
+check('ref: lines in one cell', cells.claude_ref(fixture, 11, 13), 'cell-1 lines 1-3')
+check('ref: lines across cells', cells.claude_ref(fixture, 12, 16), 'cell-1 line 2 to cell-2 line 1')
+check('ref: none in the header', cells.claude_ref(fixture, 2, 2), nil)
+check('ref: long text is cut', cells.claude_ref({ '# %%', ('x'):rep(70) }, 2, 2), 'cell-0 line 1: `' .. ('x'):rep(60) .. '…`')
+
 check('shift: number', cells.shift_level(2), '3')
 check('shift: string number', cells.shift_level '0', '1')
 check('shift: fold start', cells.shift_level '>1', '>2')
