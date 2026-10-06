@@ -131,7 +131,8 @@ train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={}]]
   -- past one leaves a command that fails loudly rather than a wrong job; the
   -- video line is the exception and stays runnable as-is. The pbtxt braces are
   -- doubled because fmt eats single ones, and fmta is not an option here: its
-  -- <> delimiters collide with the shell's > and <<.
+  -- <> delimiters collide with the shell's > and <<. Choice-node text is not
+  -- run through fmt, so the override line's braces stay single.
   s(
     'simtest',
     fmt(
@@ -142,11 +143,12 @@ simulations_to_run {{
   config_path: "fullstack"
   autonomy_config {{ variant: "{}" }}
   {}
+  {}
 }}
 EOF
 bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_job -- \
 --email=jke \
---commit=$(git rp --verify {}) \
+--commit="$(git rp --verify {})" \
 --job_name="{}" \
 --job_type=ui \
 --request_proto_path="$req"]],
@@ -162,6 +164,18 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
         -- than a label so it is runnable untouched; clear the stop to drop the
         -- video and the blank line still parses as pbtxt.
         i(5, 'configs_to_merge_paths: "mixins/report_config/create_video.pbtxt"'),
+        -- Pose-divergence cutoff, cycled with <C-j>/<C-k> like `repriori`'s
+        -- fields. The simulator ends a sim once the sim ego is 50 m from the
+        -- logged pose (simulator.cc MaybeEndSimulationFromPoseDivergence);
+        -- the second choice turns that off, for when you need every scene's
+        -- full window, e.g. to dump it with labels. Off by default because past
+        -- 50 m the replayed agents no longer fit the ego. The first choice is a
+        -- pbtxt `#` comment rather than empty so the option shows up in the
+        -- expansion; load_pbtxt skips it.
+        c(6, {
+          t '# <C-j>/<C-k>: run past 50 m pose divergence',
+          t 'simulator_config { all_tasks_config { simulator_config_override_pbtxt: "disable_early_termination_from_pose_divergence: true" } }',
+        }),
         -- Anything git rev-parse resolves, so HEAD or a branch works too. Goes
         -- through --verify to fail here rather than at BATES.
         i(3, 'commit hash'),
@@ -171,6 +185,27 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
       }
     )
   ),
+  -- `simpersist`: keep a simtest job's NDFs past the 3-day default TTL
+  -- (DEFAULT_SIMTEST_TTL, tool/simtest_retention_management/common.py:8).
+  -- Persisting the job is the only route that works: copying an NDF elsewhere
+  -- breaks it, since NDFs reference sibling directories in the job dir. Days
+  -- count from now, not from the job start. Re-persisting an already-persisted
+  -- job errors unless --update-description is added, and even then the TTL
+  -- only ever grows (enforce_monotonic_update, retention_utils.py); use
+  -- `extend-ttl <job> <days>` to add days to an existing row instead.
+  s(
+    'simpersist',
+    fmt([[n simtests retention persist {} '{}' --days-to-retain={}]], {
+      i(1, 'job id'),
+      -- Required, and shown to platform when they chase storage cost.
+      i(2, 'why keep it'),
+      i(3, '30'),
+    })
+  ),
+  -- `simpersisted`: list my persisted jobs, soonest expiry first, with job dir
+  -- and days remaining. Caches are dropped because I never add any. For one
+  -- job, `get-persisted-job-info <job>` answers whether it is persisted at all.
+  s('simpersisted', t 'n simtests retention get-my-persisted --no-include-caches'),
   -- `repriori`: build one row for the BATES GW prioritization sheet and leave it on
   -- the system clipboard, ready to paste into the leftmost empty cell of a new
   -- row -- Sheets splits pasted text on tabs, so one paste fills the row. The
