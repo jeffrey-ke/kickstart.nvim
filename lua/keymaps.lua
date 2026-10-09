@@ -177,6 +177,15 @@ vim.keymap.set('n', 'z0', function()
   end
 end, { desc = 'Diff: fold unchanged runs again' })
 
+-- Whole-file do/dp: dO in the working-tree side of `git difftool $base` rolls
+-- the file all the way back to $base.
+vim.keymap.set('n', 'dO', '<Cmd>%diffget<CR>', { desc = 'Diff: get every hunk from the other window' })
+vim.keymap.set('n', 'dP', '<Cmd>%diffput<CR>', { desc = 'Diff: put every hunk into the other window' })
+
+vim.api.nvim_create_user_command('W', function(opts)
+  vim.cmd(opts.bang and 'wqa!' or 'wqa')
+end, { bang = true, desc = 'Write all and quit; :W! forces' })
+
 -- The chain of folds enclosing the cursor, outermost first, as {start, stop}
 -- line pairs. No fold API reports this directly, so it is read the way vim
 -- exposes it: with everything closed, foldclosed('.')/foldclosedend('.') give
