@@ -25,6 +25,41 @@ local data = vim.fn.stdpath 'data'
 local venv = data .. '/molten-venv'
 local server_url = vim.env.NOTEBOOK_SERVER_URL or 'http://127.0.0.1:8899'
 
+-- jupytext.nvim's BufReadCmd also matches fugitive://.../x.ipynb and dies trying to io.open the
+-- URL. Leave URLs to their own reader; fugitive's notebook blobs are converted once it loads them.
+local function skip_urls_in_jupytext()
+  local read = vim.api.nvim_get_autocmds({ group = 'jupytext-nvim', event = 'BufReadCmd' })[1]
+  vim.api.nvim_del_autocmd(read.id)
+  vim.api.nvim_create_autocmd('BufReadCmd', {
+    group = 'jupytext-nvim',
+    pattern = read.pattern,
+    callback = function(event)
+      if not event.match:match '^%a+://' then
+        read.callback(event)
+      end
+    end,
+  })
+end
+
+-- Shows a notebook blob that fugitive loaded (:Gdiffsplit, :Gedit rev:x.ipynb) as the same
+-- hydrogen script jupytext.nvim shows for the work tree, so diffs line up cell by cell.
+-- Read-only: a :w on an index blob would otherwise stage the script in place of the JSON.
+local function convert_fugitive_notebook()
+  local buf = vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_get_name(buf):match '%.ipynb$' then
+    return
+  end
+  local json = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+  local result = vim.system({ 'jupytext', '--from', 'ipynb', '--to', 'py:hydrogen', '-o', '-' }, { stdin = json }):wait()
+  assert(result.code == 0, result.stderr)
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(result.stdout:gsub('\n$', ''), '\n'))
+  vim.bo[buf].modified = false
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].readonly = true
+  vim.bo[buf].filetype = 'python'
+end
+
 return {
   {
     'GCBallesteros/jupytext.nvim',
@@ -35,6 +70,12 @@ return {
     end,
     config = function()
       require('jupytext').setup { style = 'hydrogen' }
+      skip_urls_in_jupytext()
+      vim.api.nvim_create_autocmd('User', {
+        group = vim.api.nvim_create_augroup('fugitive-notebook', { clear = true }),
+        pattern = { 'FugitiveBlob', 'FugitiveStageBlob' },
+        callback = convert_fugitive_notebook,
+      })
       require('custom.notebook_cells').setup()
     end,
   },
