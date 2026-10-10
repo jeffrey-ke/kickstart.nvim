@@ -1584,7 +1584,9 @@ require('lazy').setup({
         -- highlighting for latex specifically is the documented fix.
         disable = { 'latex' },
       },
-      indent = { enable = true, disable = { 'ruby' } },
+      -- C/C++: treesitter indents by syntax-tree depth, so a lambda aligned under
+      -- `x |` continuation lines gets `o` at statement-start + n*sw. cindent aligns.
+      indent = { enable = true, disable = { 'ruby', 'cpp', 'c' } },
     },
     -- There are additional nvim-treesitter modules that you can use to interact
     -- with nvim-treesitter. You should go explore a few and see what interests you:
