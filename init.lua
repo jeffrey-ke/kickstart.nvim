@@ -412,7 +412,8 @@ vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHo
   desc = 'Check for file changes when focus is gained or buffer is entered',
   group = vim.api.nvim_create_augroup('auto-reload', { clear = true }),
   callback = function()
-    if vim.fn.mode() ~= 'c' then
+    -- The cmdwin (q: / c_CTRL-F) reports mode() 'n', but checktime is E11 there.
+    if vim.fn.mode() ~= 'c' and vim.fn.getcmdwintype() == '' then
       vim.cmd 'checktime'
     end
   end,
