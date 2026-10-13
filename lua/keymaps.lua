@@ -64,7 +64,7 @@ vim.keymap.set('n', '<leader>cl', function()
   else
     vim.cmd 'lopen'
   end
-end, { desc = 'Quickfix: this window\'s [l]ocation list, open or close' })
+end, { desc = "Quickfix: this window's [l]ocation list, open or close" })
 
 -- Inside a list window, keys that edit the list it shows -- quickfix or
 -- location, so one set serves both. Inside that window every `:l` command
@@ -687,7 +687,7 @@ end
 local function bodies_first(word)
   return function(found)
     local rank = require 'custom.local_def.rank'
-    return rank.definitions_first(rank.without_statements(found, word), word,require('custom.local_def.disk').load)
+    return rank.definitions_first(rank.without_statements(found, word), word, require('custom.local_def.disk').load)
   end
 end
 
