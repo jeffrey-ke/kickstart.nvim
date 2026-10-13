@@ -540,16 +540,33 @@ do
   check('rank: an inline member function is a definition', rank.kind(munit, 1, mline[2], 'GetAll'), 'definition')
   check('rank: a member prototype is a declaration', rank.kind(munit, 4, mline[5], 'Get'), 'declaration')
 
+  local alias = 'using A =\n    origin::Message<B>;\ntypedef std::vector<B> T;\n'
+  local aunit = { path = '/r/a.h', root = vim.treesitter.get_string_parser(alias, 'cpp'):parse()[1]:root(), source = alias }
+  local aline = vim.split(alias, '\n')
+  check('rank: a using alias is a definition', rank.kind(aunit, 0, aline[1], 'A'), 'definition')
+  check('rank: a typedef is a definition', rank.kind(aunit, 2, aline[3], 'T'), 'definition')
+  check('rank: the aliased type is neither', rank.kind(aunit, 2, aline[3], 'vector'), nil)
+
   local statements = {
     { filename = '/r/f.cc', lnum = 3, col = 1, text = '  return F(x);' },
     { filename = '/r/f.cc', lnum = 4, col = 1, text = '  else F();' },
     { filename = '/r/f.h', lnum = 1, col = 1, text = '  size_t F(int x);' },
     { filename = '/r/f.cc', lnum = 5, col = 1, text = '  returned_value F(int x);' },
     { filename = 'notes.md', lnum = 1, col = 1, text = '  return F(x)' },
+    { filename = '/r/f.h', lnum = 2, col = 1, text = 'using F =' },
+    { filename = '/r/f.h', lnum = 3, col = 1, text = 'typedef std::vector<int> F;' },
+    { filename = '/r/f.h', lnum = 4, col = 1, text = '  using T = decltype(F(x));' },
+    { filename = '/r/f.h', lnum = 5, col = 1, text = 'typedef std::vector<F> T;' },
   }
-  check('rank: statement-keyword lines dropped, in C/C++ only', vim.tbl_map(function(l)
+  check('rank: statement-keyword lines dropped, in C/C++ only, but not an alias of the name', vim.tbl_map(function(l)
     return l.text
-  end, rank.without_statements(statements)), { '  size_t F(int x);', '  returned_value F(int x);', '  return F(x)' })
+  end, rank.without_statements(statements, 'F')), {
+    '  size_t F(int x);',
+    '  returned_value F(int x);',
+    '  return F(x)',
+    'using F =',
+    'typedef std::vector<int> F;',
+  })
 
   check('rank: definitions, then the rest, then declarations', vim.tbl_map(function(l)
     return l.filename

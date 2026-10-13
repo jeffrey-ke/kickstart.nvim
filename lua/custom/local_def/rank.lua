@@ -21,6 +21,10 @@ end
 
 local type_specifiers = { class_specifier = true, struct_specifier = true, union_specifier = true, enum_specifier = true }
 
+-- The field holding the name a type alias declares: `using Foo = Bar;`,
+-- `typedef Bar Foo;`. Any other name on the line is part of the aliased type.
+local alias_name = { alias_declaration = 'name', type_definition = 'declarator' }
+
 -- Nodes between a declared name and its declaration. Passing through anything
 -- else -- a call, an argument list, a body -- means the name is used there,
 -- not declared: `size_t n = F(x);` is not a declaration of F.
@@ -36,7 +40,7 @@ local signature_path = {
 }
 
 --- Pure. What the name `name` on 0-based `row` of `unit` is, given that row's
---- text: 'definition' (a function with a body, a class with a body),
+--- text: 'definition' (a function with a body, a class with a body, an alias),
 --- 'declaration' (a prototype, a forward declaration, a member declared in a
 --- class), or nil when it is neither -- a use, a comment, a macro.
 function M.kind(unit, row, line, name)
@@ -59,6 +63,10 @@ function M.kind(unit, row, line, name)
     if type_specifiers[t] then
       return field(up, 'body') and 'definition' or 'declaration'
     end
+    if alias_name[t] then
+      local declared = field(up, alias_name[t])
+      return declared and child:equal(declared) and 'definition' or nil
+    end
     if not signature_path[t] then
       return nil
     end
@@ -73,14 +81,23 @@ for _, kw in ipairs { 'return', 'else', 'throw', 'delete', 'new', 'case', 'goto'
   statement_keywords[kw] = true
 end
 
+-- Whether `text` is the alias definition of `name` -- the one `using` or
+-- `typedef` line that is not a statement.
+local function aliases(text, name)
+  local escaped = vim.pesc(name)
+  return text:find('^%s*using%s+' .. escaped .. '%s*=') or text:find('^%s*typedef%f[^%w_].*%f[%w_]' .. escaped .. '%s*;')
+end
+
 --- Pure. Locations without the C/C++ hits whose line opens with a statement
 --- keyword -- the calls the indented-member grep pattern cannot exclude by
---- itself. Hits in other files are kept as they are.
-function M.without_statements(locations)
+--- itself -- except an alias that declares `name`. Hits in other files are
+--- kept as they are.
+function M.without_statements(locations, name)
   return vim.tbl_filter(function(location)
     local ext = location.filename and location.filename:match '%.(%w+)$'
-    local first = (location.text or ''):match '^%s*([%w_]+)'
-    return not (ext and CPP_EXTENSIONS[ext] and statement_keywords[first])
+    local text = location.text or ''
+    local first = text:match '^%s*([%w_]+)'
+    return not (ext and CPP_EXTENSIONS[ext] and statement_keywords[first] and not aliases(text, name))
   end, locations)
 end
 
