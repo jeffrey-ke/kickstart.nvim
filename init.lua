@@ -143,6 +143,36 @@ vim.api.nvim_create_autocmd('ColorScheme', {
   callback = set_tabline_modified,
 })
 vim.o.showtabline = 2
+-- The buffer list is global, so `:tab split` changes nothing in it -- the new
+-- tab shows the buffer that was already current. Tab pages get their own cells,
+-- right-aligned after the buffers, named by each tab's focused window. Only once
+-- there is a second tab, so the everyday one-tab line is unchanged. `%NT` makes
+-- a cell clickable.
+local function tabpage_cells()
+  local tabs = vim.api.nvim_list_tabpages()
+  if #tabs < 2 then
+    return ''
+  end
+  local current = vim.api.nvim_get_current_tabpage()
+  local cells = { '%=' }
+  for i, tab in ipairs(tabs) do
+    -- A focused float (a Telescope prompt) would read as [No Name]; name the
+    -- window it was opened from instead.
+    local win = vim.api.nvim_tabpage_get_win(tab)
+    if vim.api.nvim_win_get_config(win).relative ~= '' then
+      local prev = vim.fn.win_getid(vim.fn.tabpagewinnr(i, '#'), i)
+      win = prev ~= 0 and prev or win
+    end
+    local buf = vim.api.nvim_win_get_buf(win)
+    local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':t')
+    if name == '' then
+      name = '[No Name]'
+    end
+    local hl = tab == current and '%#TabLineSel#' or '%#TabLine#'
+    table.insert(cells, ('%%%dT%s %d:%s '):format(i, hl, i, name))
+  end
+  return table.concat(cells) .. '%T%#TabLineFill#'
+end
 function _G.custom_tabline()
   local bufs = {}
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -162,9 +192,13 @@ function _G.custom_tabline()
       table.insert(bufs, hl .. ' ' .. name .. modified .. ' ')
     end
   end
-  return table.concat(bufs) .. '%#TabLineFill#'
+  return table.concat(bufs) .. '%#TabLineFill#' .. tabpage_cells()
 end
 vim.o.tabline = '%!v:lua.custom_tabline()'
+
+-- Open the current buffer in a new tab, cursor and view kept. `<C-w>T` instead
+-- *moves* the window out, and Telescope's <C-t> opens a picked entry in a tab.
+vim.keymap.set('n', '<leader>T', '<cmd>tab split<CR>', { desc = 'Open buffer in new [T]ab' })
 
 -- Make line numbers default
 vim.o.number = true
@@ -868,6 +902,9 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>sq', builtin.quickfix, { desc = '[S]earch [Q]uickfix list' })
       vim.keymap.set('n', '<leader>sQ', builtin.quickfixhistory, { desc = '[S]earch [Q]uickfix history' })
       vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
+      vim.keymap.set('n', '<leader>st', function()
+        require('custom.tab_picker').pick()
+      end, { desc = '[S]earch [T]abs' })
 
       -- Slightly advanced example of overriding default behavior and theme
       vim.keymap.set('n', '<leader>/', function()
