@@ -27,22 +27,13 @@ end, { desc = 'Highlight all matches of word under cursor (no jump)' })
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
--- Quickfix navigation under <leader>c, shaped like buffer motion: `cj`/`ck` step
--- one entry (`:cnext`/`:cprevious`, count-aware), `cgg`/`cG` jump to the ends
--- (`:cfirst`/`:clast`). Stepping off either end is an error in Vim (E553), so
--- these wrap around instead, and an empty list says so rather than raising E42.
+-- Quickfix and location lists. Stepping is nvim's own: `]q`/`[q` one entry,
+-- `]Q`/`[Q` the last and first, `]<C-q>`/`[<C-q>` the next and previous file
+-- -- and the same with `l` for the location list. <leader>c adds the ends
+-- shaped like buffer motion, `cgg`/`cG`, and an empty list says so rather
+-- than raising E42.
 local function qf_size()
   return vim.fn.getqflist({ size = 0 }).size
-end
-
-local function qf_step(cmd, wrap)
-  return function()
-    if qf_size() == 0 then
-      vim.notify('Quickfix list is empty', vim.log.levels.WARN)
-    elseif not pcall(vim.cmd, vim.v.count1 .. cmd) then
-      vim.cmd(wrap)
-    end
-  end
 end
 
 local function qf_edge(cmd)
@@ -55,10 +46,95 @@ local function qf_edge(cmd)
   end
 end
 
-vim.keymap.set('n', '<leader>cj', qf_step('cnext', 'cfirst'), { desc = 'Quickfix next entry' })
-vim.keymap.set('n', '<leader>ck', qf_step('cprevious', 'clast'), { desc = 'Quickfix previous entry' })
 vim.keymap.set('n', '<leader>cgg', qf_edge 'cfirst', { desc = 'Quickfix first entry' })
 vim.keymap.set('n', '<leader>cG', qf_edge 'clast', { desc = 'Quickfix last entry' })
+
+-- `getqflist({winid = 0})` names the list's window when it is open, and from
+-- inside a location list window `getloclist(0, ...)` is that window's list,
+-- so `<leader>cl` closes it from there too.
+vim.keymap.set('n', '<leader>co', function()
+  vim.cmd(vim.fn.getqflist({ winid = 0 }).winid ~= 0 and 'cclose' or 'copen')
+end, { desc = 'Quickfix window: [o]pen or close' })
+
+vim.keymap.set('n', '<leader>cl', function()
+  if vim.fn.getloclist(0, { winid = 0 }).winid ~= 0 then
+    vim.cmd 'lclose'
+  elseif vim.fn.getloclist(0, { size = 0 }).size == 0 then
+    vim.notify('This window has no location list', vim.log.levels.WARN)
+  else
+    vim.cmd 'lopen'
+  end
+end, { desc = 'Quickfix: this window\'s [l]ocation list, open or close' })
+
+-- Inside a list window, keys that edit the list it shows -- quickfix or
+-- location, so one set serves both. Inside that window every `:l` command
+-- and `getloclist(0)` act on its own list.
+local function in_loclist()
+  return vim.fn.getwininfo(vim.api.nvim_get_current_win())[1].loclist == 1
+end
+
+-- Rows `first`..`last` out of the list, in place: the list keeps its title
+-- and its slot in the history, so `u` does not bring them back. Pushing a new
+-- list per delete would make it undoable, but the history holds ten lists,
+-- and a few deletes would push the original search out of it.
+local function remove_entries(first, last)
+  local loc = in_loclist()
+  local what = { items = 0, title = 0, context = 0 }
+  local list = loc and vim.fn.getloclist(0, what) or vim.fn.getqflist(what)
+  last = math.min(last, #list.items)
+  for i = last, first, -1 do
+    table.remove(list.items, i)
+  end
+  if #list.items > 0 then
+    list.idx = math.min(first, #list.items)
+  end
+  if loc then
+    vim.fn.setloclist(0, {}, 'r', list)
+  else
+    vim.fn.setqflist({}, 'r', list)
+  end
+  vim.api.nvim_win_set_cursor(0, { math.max(math.min(first, #list.items), 1), 0 })
+end
+
+-- `:colder`/`:cnewer` (`:lolder`/`:lnewer`), quiet at either end of the
+-- history rather than raising E380/E381.
+local function list_history(step)
+  return function()
+    local ok, err = pcall(vim.cmd, vim.v.count1 .. (in_loclist() and 'l' or 'c') .. step)
+    if not ok then
+      vim.notify(err:match 'E%d+: .*' or err, vim.log.levels.WARN)
+    end
+  end
+end
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'qf',
+  desc = 'Filter, trim, and step through the history of the list in this window',
+  callback = function(ev)
+    local function map(mode, lhs, rhs, opts)
+      vim.keymap.set(mode, lhs, rhs, vim.tbl_extend('force', { buffer = ev.buf }, opts))
+    end
+    -- Into the command line rather than a prompt, so history, <C-r><C-w> and
+    -- `/pat/` delimiters all work. A filter pushes a new list; `u` undoes it.
+    map('n', 'f', function()
+      return ':' .. (in_loclist() and 'L' or 'C') .. 'filter '
+    end, { expr = true, desc = 'Keep entries matching a pattern' })
+    map('n', 'F', function()
+      return ':' .. (in_loclist() and 'L' or 'C') .. 'filter! '
+    end, { expr = true, desc = 'Drop entries matching a pattern' })
+    map('n', 'dd', function()
+      local first = vim.fn.line '.'
+      remove_entries(first, first + vim.v.count1 - 1)
+    end, { desc = 'Remove the entry under the cursor' })
+    map('x', 'd', function()
+      local a, b = vim.fn.line 'v', vim.fn.line '.'
+      vim.api.nvim_feedkeys(vim.keycode '<Esc>', 'nx', false)
+      remove_entries(math.min(a, b), math.max(a, b))
+    end, { desc = 'Remove the selected entries' })
+    map('n', 'u', list_history 'older', { desc = 'Older list (undo a filter)' })
+    map('n', '<C-r>', list_history 'newer', { desc = 'Newer list (redo a filter)' })
+  end,
+})
 
 -- Force diagnostic rendering on for every filetype. init.lua's [[ Diagnostic Config ]]
 -- paints only shell buffers by default; that replaced a blanket vim.diagnostic.enable(false),
