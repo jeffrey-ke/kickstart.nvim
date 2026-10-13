@@ -199,6 +199,9 @@ vim.o.tabline = '%!v:lua.custom_tabline()'
 -- Open the current buffer in a new tab, cursor and view kept. `<C-w>T` instead
 -- *moves* the window out, and Telescope's <C-t> opens a picked entry in a tab.
 vim.keymap.set('n', '<leader>T', '<cmd>tab split<CR>', { desc = 'Open buffer in new [T]ab' })
+-- Close the tab and all its windows; the buffers stay loaded. Errors (E784) on
+-- the last tab rather than quitting nvim.
+vim.keymap.set('n', '<leader>Q', '<cmd>tabclose<CR>', { desc = 'Close tab ([Q]uit its windows)' })
 
 -- Make line numbers default
 vim.o.number = true
