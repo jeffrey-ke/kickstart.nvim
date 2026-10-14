@@ -11,8 +11,13 @@
 -- Every group carries the `.cpp` suffix, so no other language is touched, and
 -- each role lists its tree-sitter capture and clangd's semantic token together:
 -- with clangd attached the token (priority 125) wins over tree-sitter (100), so
--- coloring only one of the two would change with LSP state. The two roles with
--- no stock capture come from after/queries/cpp/highlights.scm.
+-- coloring only one of the two would change with LSP state. The roles with no
+-- stock capture come from after/queries/cpp/highlights.scm.
+--
+-- Keywords are tree-sitter only (clangd sends no keyword tokens). Stock paints
+-- every one mauve, so `for` and `if` were lost among `const`/`using`/`public`;
+-- control flow and exits are bolded out of that crowd, and a lambda's capture
+-- list marks where a lambda's block opens the way `for` marks a loop's.
 local M = {}
 
 -- role -> palette color + style, and every group that should render as it.
@@ -30,6 +35,9 @@ local roles = {
   parameter = { fg = 'maroon', italic = true, groups = { '@variable.parameter', '@lsp.type.parameter' } },
   member = { fg = 'teal', groups = { '@variable.member', '@property', '@lsp.type.property' } },
   variable = { fg = 'text', groups = { '@variable', '@lsp.type.variable' } },
+  control = { fg = 'mauve', bold = true, groups = { '@keyword.repeat', '@keyword.conditional' } },
+  exit = { fg = 'red', bold = true, groups = { '@keyword.exit' } },
+  lambda = { fg = 'pink', bold = true, groups = { '@keyword.lambda' } },
 }
 
 function M.apply()

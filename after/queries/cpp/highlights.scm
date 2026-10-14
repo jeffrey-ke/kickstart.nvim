@@ -50,3 +50,21 @@
 ((namespace_identifier) @module
   (#lua-match? @module "^[%l_]")
   (#set! priority 129))
+
+; Where control leaves the function. Stock splits these across
+; @keyword.return / .coroutine / .exception, and the last also holds try/catch.
+(["return" "co_return" "throw"] @keyword.exit
+  (#set! priority 101))
+
+; A lambda's capture list, `[&]` / `[=]` / `[this, x]`, as the marker that a
+; block opens here. The whole node, so captured names are covered too -- above
+; clangd's variable tokens, or they would punch holes in it.
+((lambda_capture_specifier) @keyword.lambda
+  (#set! priority 128))
+
+; A lambda bound to a name is a function definition in all but syntax:
+; `auto on_track = [&](...) {`. Above clangd, which calls it a variable.
+(init_declarator
+  declarator: (identifier) @function.definition
+  value: (lambda_expression)
+  (#set! priority 128))
