@@ -1448,6 +1448,12 @@ require('lazy').setup({
         -- throughout. Floats stay opaque (`float.transparent` defaults false),
         -- so hover and completion windows still read as raised panels.
         transparent_background = true,
+        -- Auto-detected anyway, but named so the cache rebuilds: catppuccin
+        -- recompiles when the hash of these options changes, and the installed
+        -- plugin list is not in that hash. A cache compiled before ibl existed
+        -- otherwise never gains IblIndent/IblScope, and ibl falls back to
+        -- giving both the same color -- the scope guide then can't be told apart.
+        integrations = { indent_blankline = { enabled = true } },
         custom_highlights = function(colors)
           -- Light vs dark is read off the palette handed in, not off
           -- &background: catppuccin compiles every flavour in one pass, so a
@@ -1647,7 +1653,7 @@ require('lazy').setup({
   --  Uncomment any of the lines below to enable them (you will need to restart nvim).
   --
   -- require 'kickstart.plugins.debug',
-  -- require 'kickstart.plugins.indent_line',
+  require 'kickstart.plugins.indent_line',
   -- require 'kickstart.plugins.lint',
   -- require 'kickstart.plugins.autopairs',
   require 'kickstart.plugins.neo-tree',
