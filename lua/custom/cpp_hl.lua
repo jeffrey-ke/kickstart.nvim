@@ -16,7 +16,7 @@
 --
 -- Keywords are tree-sitter only (clangd sends no keyword tokens). Stock paints
 -- every one mauve, so `for` and `if` were lost among `const`/`using`/`public`;
--- control flow and exits are bolded out of that crowd, and a lambda's capture
+-- control flow and exits get their own bold hues, and a lambda's capture
 -- list marks where a lambda's block opens the way `for` marks a loop's.
 local M = {}
 
@@ -35,7 +35,7 @@ local roles = {
   parameter = { fg = 'maroon', italic = true, groups = { '@variable.parameter', '@lsp.type.parameter' } },
   member = { fg = 'teal', groups = { '@variable.member', '@property', '@lsp.type.property' } },
   variable = { fg = 'text', groups = { '@variable', '@lsp.type.variable' } },
-  control = { fg = 'mauve', bold = true, groups = { '@keyword.repeat', '@keyword.conditional' } },
+  control = { fg = 'sapphire', bold = true, groups = { '@keyword.repeat', '@keyword.conditional' } },
   exit = { fg = 'red', bold = true, groups = { '@keyword.exit' } },
   lambda = { fg = 'pink', bold = true, groups = { '@keyword.lambda' } },
 }
