@@ -7,7 +7,8 @@
 -- resolve.lua applies the scoping rules, all without touching nvim or disk, so
 -- their behavior is pinned by tests/local_def_test.lua.
 --
--- Anything that is not a local or a member -- a function, a type, a name from
+-- A C++ member access, `obj.x`, resolves through the class `obj` is declared
+-- as. Anything that is not a local or a member -- a function, a type, a name from
 -- another file -- resolves to nothing, and the caller falls back to jedi
 -- (Python) or its repo-wide grep. A Python import does resolve, flagged: it is
 -- a binding, but it only says the definition is in another file.
@@ -20,11 +21,69 @@ local resolve = require 'custom.local_def.resolve'
 
 local M = {}
 
+-- Definitions of the name at `node`, nearest first, in resolve.lua's shape:
+-- { {name, pos, path, import} }, `path` set when the definition is in a file
+-- other than the buffer.
+local definitions
+
+-- The unit a definition was found in: the buffer, or a file read from disk.
+local function unit_of(ctx, def)
+  if def.path and def.path ~= ctx.unit.path then
+    return disk.load(def.path)
+  end
+  return ctx.unit
+end
+
+-- `obj.x`: no scope binds `x`, so look it up in the class `obj` is declared
+-- as. `obj` itself resolves by the same rules as any name -- through scopes, or
+-- through another member access for `a.b.x` -- and `this` is the enclosing
+-- class. One declared type per hop, read off the declaration: `auto`, a call's
+-- return value, or a smart pointer's pointee is a type it does not see, and the
+-- lookup gives up to the grep.
+local function member_definitions(ctx, node, object)
+  local class, from
+  if object:type() == 'this' then
+    class, from = members.enclosing_class(node, ctx.bufnr), ctx.unit
+  else
+    local named = object:type() == 'field_expression' and object:field('field')[1] or object
+    local def = definitions(ctx, named)[1]
+    from = def and unit_of(ctx, def)
+    class = from and members.declared_type(from, def.pos)
+  end
+  if not class then
+    return {}
+  end
+  return members.lookup(class, vim.treesitter.get_node_text(node, ctx.bufnr), from, disk) or {}
+end
+
+definitions = function(ctx, node)
+  local object = ctx.spec.member_object and ctx.spec.member_object(node)
+  if object then
+    return member_definitions(ctx, node, object)
+  end
+  if not ctx.spec.is_reference(node) then
+    return {}
+  end
+  local name = vim.treesitter.get_node_text(node, ctx.bufnr)
+
+  local members_for
+  if ctx.spec.out_of_line_members then
+    members_for = function(fn)
+      local class = members.method_class(fn, ctx.bufnr)
+      return class and members.lookup(class, name, ctx.unit, disk)
+    end
+  end
+
+  local scopes, defs, ref_scope = collect.collect(ctx.unit.root, ctx.bufnr, ctx.spec, node, members_for)
+  local ref = { name = name, scope = ref_scope, pos = { node:start() } }
+  return resolve.resolve(scopes, defs, ref, ctx.spec.rules)
+end
+
 --- Definitions of the identifier at the 0-based (row, col) of `bufnr`, nearest
 --- first, as { {row, col, name, path, import} }. `path` is set only for a
 --- definition in another file; `import` only for a binding an import made.
 --- {} when the buffer has no supported parser, the position is not on a
---- variable name, or nothing in scope binds it.
+--- variable or member name, or nothing in scope binds it.
 function M.find(bufnr, row, col)
   local lang = vim.treesitter.language.get_lang(vim.bo[bufnr].filetype)
   local spec = lang and languages[lang]
@@ -37,27 +96,20 @@ function M.find(bufnr, row, col)
   end
   local root = parser:parse()[1]:root()
   local node = root:named_descendant_for_range(row, col, row, col)
-  if not node or not spec.is_reference(node) then
+  if not node then
     return {}
   end
-  local name = vim.treesitter.get_node_text(node, bufnr)
 
   local buffer_path = vim.api.nvim_buf_get_name(bufnr)
-  local members_for
-  if spec.out_of_line_members then
-    local unit = { path = buffer_path ~= '' and buffer_path or nil, root = root, source = bufnr }
-    members_for = function(fn)
-      local class = members.method_class(fn, bufnr)
-      return class and members.lookup(class, name, unit, disk)
-    end
-  end
-
-  local scopes, defs, ref_scope = collect.collect(root, bufnr, spec, node, members_for)
-  local ref = { name = name, scope = ref_scope, pos = { node:start() } }
+  local ctx = {
+    bufnr = bufnr,
+    spec = spec,
+    unit = { path = buffer_path ~= '' and buffer_path or nil, root = root, source = bufnr },
+  }
   return vim.tbl_map(function(def)
     local elsewhere = def.path and def.path ~= buffer_path
     return { row = def.pos[1], col = def.pos[2], name = def.name, path = elsewhere and def.path or nil, import = def.import }
-  end, resolve.resolve(scopes, defs, ref, spec.rules))
+  end, definitions(ctx, node))
 end
 
 local function line_at(bufnr, def)

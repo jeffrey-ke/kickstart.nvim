@@ -509,6 +509,72 @@ do
   end, found), { { '/w/foo.cc', 1 }, { '/w/foo.h', 2 } })
 end
 
+-- Member access through the object's declared type ---------------------------
+
+case('c++: a member of a member, through a nested type', 'cpp', [[
+class Node {
+  struct Msgs { int grids; };
+  struct Input { Msgs msgs; };
+  void Run();
+  Node::Input buf_;
+};
+void Node::Run() { use(buf_.msgs); }
+]], { 'msgs', 2 }, { { 'msgs', 1 } })
+
+case('c++: a chain of member accesses', 'cpp', [[
+class Node {
+  struct Msgs { int grids; };
+  struct Input { Msgs msgs; };
+  void Run();
+  Input buf_;
+};
+void Node::Run() { use(buf_.msgs.grids); }
+]], { 'grids', 2 }, { { 'grids', 1 } })
+
+case('c++: through a pointer parameter', 'cpp', [[
+struct S { int x; };
+void f(const S* s) { use(s->x); }
+]], { 'x', 2 }, { { 'x', 1 } })
+
+case('c++: only the declared class, not a same-named member elsewhere', 'cpp', [[
+struct A { int x; };
+struct B { int x; };
+void f(B b) { use(b.x); }
+]], { 'x', 3 }, { { 'x', 2 } })
+
+case('c++: this-> in an out-of-line method', 'cpp', [[
+struct S { void g(); int m_; };
+void S::g() { use(this->m_); }
+]], { 'm_', 2 }, { { 'm_', 1 } })
+
+case('c++: a method called on an object goes to its body', 'cpp', [[
+struct S { void g(); };
+void S::g() {}
+void f(S& s) { s.g(); }
+]], { 'g', 3 }, { { 'g', 2 }, { 'g', 1 } })
+
+case('c++: an auto object has no declared type to follow', 'cpp', [[
+struct S { int x; };
+void f() { auto s = S(); use(s.x); }
+]], { 'x', 2 }, {})
+
+do
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, 'p')
+  vim.fn.writefile({ 'struct In { int v; };', 'class Foo {', '  void g();', '  In in_;', '};' }, dir .. '/foo.h')
+  local lines = { '#include "foo.h"', 'void Foo::g() { use(in_.v); }' }
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_name(bufnr, dir .. '/foo.cc')
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].filetype = 'cpp'
+  local pos = at(lines, 'v', 1)
+  check('disk: a member of a member declared in the header', vim.tbl_map(function(def)
+    return { def.path and vim.fs.basename(def.path), def.row, def.col }
+  end, local_def.find(bufnr, pos[1], pos[2])), { { 'foo.h', 0, 16 } })
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  vim.fn.delete(dir, 'rf')
+end
+
 -- Ranking grep hits ------------------------------------------------------------
 
 do

@@ -128,6 +128,14 @@ local cpp = {
     end
     return not (parent and parent:type() == 'qualified_identifier')
   end,
+  -- For the `x` of `obj.x` or `obj->x`, the `obj` node: `x` is then a member of
+  -- obj's declared type, found through that type rather than by scope.
+  member_object = function(node)
+    local parent = node:parent()
+    if node:type() == 'field_identifier' and parent and parent:type() == 'field_expression' and field(parent, 'field'):equal(node) then
+      return field(parent, 'argument')
+    end
+  end,
   -- Block scoped, and a name is visible only after its declaration -- except
   -- inside a class body, where members are visible throughout.
   rules = { ordered = true, unordered_kinds = { class = true }, nested_skips_class = false },

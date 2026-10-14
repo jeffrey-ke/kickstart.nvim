@@ -72,6 +72,62 @@ function M.method_class(node, source)
   return (qualified_method(node, source))
 end
 
+--- The class `this` means at `node`: the class body it is written in, or the
+--- class of the out-of-line method it is written in. nil outside both.
+function M.enclosing_class(node, source)
+  local up = node:parent()
+  while up do
+    local t = up:type()
+    if t == 'class_specifier' or t == 'struct_specifier' then
+      local name = field(up, 'name')
+      return name and type_name(name, source)
+    end
+    local class = M.method_class(up, source)
+    if class then
+      return class
+    end
+    up = up:parent()
+  end
+end
+
+-- The shapes a declarator wraps a declared name in, between the name and the
+-- declaration that carries its type: `Foo* p`, `const Foo& r = x`, `Foo a[3]`.
+-- A function_declarator is deliberately absent: a function's name has no type
+-- whose members it could be asked for.
+local DECLARATOR_WRAPPERS = {
+  array_declarator = true,
+  attributed_declarator = true,
+  init_declarator = true,
+  parenthesized_declarator = true,
+  pointer_declarator = true,
+  reference_declarator = true,
+}
+
+local TYPED_DECLARATIONS = {
+  declaration = true,
+  field_declaration = true,
+  for_range_loop = true,
+  optional_parameter_declaration = true,
+  parameter_declaration = true,
+}
+
+--- The class name a variable, member, or parameter is declared with, given the
+--- position of its name in `unit` -- `Input` for `Foo::Input in_;`, `Foo` for
+--- `const Foo& f`. nil when the type names no class: `auto`, a builtin, or a
+--- name that is not a declaration at all.
+function M.declared_type(unit, pos)
+  local name = unit.root:named_descendant_for_range(pos[1], pos[2], pos[1], pos[2])
+  local up = name and name:parent()
+  while up and DECLARATOR_WRAPPERS[up:type()] do
+    up = up:parent()
+  end
+  if not (up and TYPED_DECLARATIONS[up:type()]) then
+    return nil
+  end
+  local type = field(up, 'type')
+  return type and type_name(type, unit.source)
+end
+
 local class_query = vim.treesitter.query.parse(
   'cpp',
   [[

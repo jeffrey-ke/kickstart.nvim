@@ -167,10 +167,6 @@ end, { desc = '[T]oggle [S]pell' })
 -- motion); <C-f>'s only stock insert-mode job is reindenting the current line.
 vim.keymap.set('i', '<C-f>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
 
--- Swap ^ and $ for easier end-of-line navigation
-vim.keymap.set({ 'n', 'o', 'v' }, '^', '$')
-vim.keymap.set({ 'n', 'o', 'v' }, '$', '^')
-
 -- Fold keymaps
 local function_types = { 'function_definition', 'function_declaration', 'method_definition', 'method_declaration', 'arrow_function', 'function' }
 
@@ -735,6 +731,7 @@ end
 --
 --   1. Scope resolution. A local variable is defined in this file, and only
 --      its enclosing scopes know which of the same-named bindings it means.
+--      A C++ `obj.x` goes through the class `obj` is declared as.
 --   2. Python: jedi, for what scopes cannot see -- an attribute, or a name an
 --      import binds, which says only that the definition is in another file.
 --   3. The import line itself, when jedi cannot follow it: the module is not
