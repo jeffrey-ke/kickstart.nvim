@@ -33,8 +33,9 @@ local roles = {
     groups = { '@function', '@function.call', '@function.method', '@function.method.call', '@constructor', '@lsp.type.function', '@lsp.type.method' },
   },
   parameter = { fg = 'maroon', italic = true, groups = { '@variable.parameter', '@lsp.type.parameter' } },
-  member = { fg = 'teal', groups = { '@variable.member', '@property', '@lsp.type.property' } },
-  variable = { fg = 'text', groups = { '@variable', '@lsp.type.variable' } },
+  -- Members read as plain variables: `p->x` keeps its colored `->`, and the
+  -- teal they had sat right beside the sapphire control flow.
+  variable = { fg = 'text', groups = { '@variable', '@lsp.type.variable', '@variable.member', '@property', '@lsp.type.property' } },
   control = { fg = 'sapphire', bold = true, groups = { '@keyword.repeat', '@keyword.conditional' } },
   exit = { fg = 'red', bold = true, groups = { '@keyword.exit' } },
   lambda = { fg = 'pink', bold = true, groups = { '@keyword.lambda' } },
