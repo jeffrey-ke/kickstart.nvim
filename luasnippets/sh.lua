@@ -56,15 +56,28 @@ local function release_single_path()
   return sn(nil, i(1, vim.json.decode(table.concat(vim.fn.readfile(meta), '\n')).single_path))
 end
 
+-- Opt-out `|& clauderead` (.functions.sh): hand the run's output to claude,
+-- prompt editable in the live choice. Cycled with <C-j>/<C-k> to the
+-- commented-out copy. Must end the command's last line -- a backslash-continued
+-- line after it would be swallowed by the comment.
+local function clauderead_choice(pos)
+  return c(pos, {
+    sn(nil, { t '|& clauderead ', i(1, '/sb I ran this') }),
+    t '# |& clauderead /sb I ran this',
+  })
+end
+
 local snippets = {
-  -- `bce`: submit a Bates core-eval comparison job. The three tab stops are
-  -- the branch commit, the base prod tag, and the eval config; each carries
+  -- `bce`: submit a Bates core-eval comparison job. The first three tab stops
+  -- are the branch commit, the base prod tag, and the eval config; each carries
   -- the value used most often, so tabbing straight through accepts them and
-  -- only the base tag normally needs retyping as prod moves each week.
+  -- only the base tag normally needs retyping as prod moves each week. The
+  -- last two are opt-in choices, commented out by default.
   s(
     'bce',
     fmt(
       [[
+{{
 branch=$(git rp --verify {}) && \
 base=$(git rp --verify {}) && \
 bazel run -c opt //behavior/core_eval/bates/scripts:submit_core_eval_comparison_job_main -- \
@@ -72,8 +85,29 @@ bazel run -c opt //behavior/core_eval/bates/scripts:submit_core_eval_comparison_
 --branch_commit $branch \
 --email jke \
 --config_name {} \
---post_processors_names DataFrameBinaryProcessor]],
-      { i(1, 'HEAD'), i(2, 'origin/prod/20260815'), i(3, 'bce_full') }
+--post_processors_names DataFrameBinaryProcessor \
+{}
+}} {}]],
+      {
+        i(1, 'HEAD'),
+        i(2, 'origin/prod/20260815'),
+        i(3, 'bce_full'),
+        -- Job name, cycled with <C-j>/<C-k> like `simtest`'s pose-divergence
+        -- line. BCE has no tag flag, so this free-text name is the only label
+        -- a job carries; left unset the orchestrator picks one
+        -- (orchestration_client.py). The first choice is the flag commented
+        -- out rather than empty so the option shows up in the expansion: the
+        -- trailing backslash above splices it onto the previous line, where
+        -- bash reads it as a comment.
+        c(4, {
+          t '# --job_name "put the job name"',
+          sn(nil, { t '--job_name "', i(1, 'job name'), t '"' }),
+        }),
+        -- Lives after the brace group's `}` rather than on stop 4's line:
+        -- bash splices continuations before stripping comments, so a
+        -- commented-out job name would comment out the pipe too.
+        clauderead_choice(5),
+      }
     )
   ),
   -- `btrain`: launch a full cloud training run. The `--` gflags have to come
@@ -151,7 +185,7 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
 --commit="$(git rp --verify {})" \
 --job_name="{}" \
 --job_type=ui \
---request_proto_path="$req"]],
+--request_proto_path="$req" {}]],
       {
         -- A USM scene set db name, not a scenario set: those are a different
         -- oneof field and need usm_scenario_set instead.
@@ -169,11 +203,11 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
         -- logged pose (simulator.cc MaybeEndSimulationFromPoseDivergence);
         -- the second choice turns that off, for when you need every scene's
         -- full window, e.g. to dump it with labels. Off by default because past
-        -- 50 m the replayed agents no longer fit the ego. The first choice is a
-        -- pbtxt `#` comment rather than empty so the option shows up in the
-        -- expansion; load_pbtxt skips it.
+        -- 50 m the replayed agents no longer fit the ego. The first choice is
+        -- the same line commented out rather than empty so the option shows up
+        -- in the expansion; load_pbtxt skips pbtxt `#` comments.
         c(6, {
-          t '# <C-j>/<C-k>: run past 50 m pose divergence',
+          t '# simulator_config { all_tasks_config { simulator_config_override_pbtxt: "disable_early_termination_from_pose_divergence: true" } }',
           t 'simulator_config { all_tasks_config { simulator_config_override_pbtxt: "disable_early_termination_from_pose_divergence: true" } }',
         }),
         -- Anything git rev-parse resolves, so HEAD or a branch works too. Goes
@@ -182,6 +216,7 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
         -- Free text, no effect on behavior; it is what you scan for in the
         -- BATES task list, so make it say which scenario you are on.
         i(4, 'job name'),
+        clauderead_choice(7),
       }
     )
   ),
@@ -206,6 +241,17 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
   -- and days remaining. Caches are dropped because I never add any. For one
   -- job, `get-persisted-job-info <job>` answers whether it is persisted at all.
   s('simpersisted', t 'n simtests retention get-my-persisted --no-include-caches'),
+  -- `simextend`: add days to an already-persisted job's TTL. The second arg is
+  -- an increase, not a new total (the CLI names it DAYS_TO_INCREASE). Written
+  -- `simtests` as above; `n simtest` also resolves, but this is the name the
+  -- CLI's own usage line prints.
+  s(
+    'simextend',
+    fmt([[n simtests retention extend-ttl {} {}]], {
+      i(1, 'job id'),
+      i(2, '30'),
+    })
+  ),
   -- `repriori`: build one row for the BATES GW prioritization sheet and leave it on
   -- the system clipboard, ready to paste into the leftmost empty cell of a new
   -- row -- Sheets splits pasted text on tabs, so one paste fills the row. The
@@ -255,7 +301,7 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
       [[
 # <C-j>/<C-k> cycles the 'No' / 'P00' / 'generic' fields, <C-u> picks from a list
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-"$(date +%-m/%-d/%Y)" 'Jeffrey Ke' 'Unusual Scenes' 'Autonomy' \
+"$(date +%-m/%-d/%Y)" 'Jeffrey Ke' 'Behavior' 'Autonomy' \
 '{}' '{}' '{}' '{}' '{}' \
 | tmux load-buffer -w -t "$(tmux list-clients -F '#{{client_name}}' | head -1)" -]],
       {
