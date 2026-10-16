@@ -6,6 +6,7 @@ local c = ls.choice_node
 local d = ls.dynamic_node
 local sn = ls.snippet_node
 local fmt = require('luasnip.extras.fmt').fmt
+local rep = require('luasnip.extras').rep
 
 -- These reach the *shell* command line, not just script files: readline's `v`
 -- (edit-and-execute-command, reachable from vi-command mode under `set -o vi`
@@ -167,11 +168,15 @@ train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={}]]
   -- doubled because fmt eats single ones, and fmta is not an option here: its
   -- <> delimiters collide with the shell's > and <<. Choice-node text is not
   -- run through fmt, so the override line's braces stay single.
+  -- The `&&` after <<'EOF' carries the chain past the heredoc body, so a failed
+  -- fetch or lookup stops before bazel instead of submitting --commit="".
   s(
     'simtest',
     fmt(
       [[
-req=$(mktemp -t simtest_req.XXXXXX.pbtxt) && cat > "$req" <<'EOF'
+git fetch origin {} && \
+commit=$(git rp --verify origin/{}) && \
+req=$(mktemp -t simtest_req.XXXXXX.pbtxt) && cat > "$req" <<'EOF' &&
 simulations_to_run {{
   scenarios_selector {{ usm_scene_set: "{}" }}
   config_path: "fullstack"
@@ -182,11 +187,16 @@ simulations_to_run {{
 EOF
 bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_job -- \
 --email=jke \
---commit="$(git rp --verify {})" \
+--commit="$commit" \
 --job_name="{}" \
 --job_type=ui \
 --request_proto_path="$req" {}]],
       {
+        -- A branch on origin, without the origin/ prefix. Fetched by name:
+        -- a branch pushed from another checkout or by a launcher has no
+        -- origin/ ref here until then.
+        i(3, 'branch'),
+        rep(3),
         -- A USM scene set db name, not a scenario set: those are a different
         -- oneof field and need usm_scenario_set instead.
         i(1, 'scene set name'),
@@ -210,9 +220,6 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
           t '# simulator_config { all_tasks_config { simulator_config_override_pbtxt: "disable_early_termination_from_pose_divergence: true" } }',
           t 'simulator_config { all_tasks_config { simulator_config_override_pbtxt: "disable_early_termination_from_pose_divergence: true" } }',
         }),
-        -- Anything git rev-parse resolves, so HEAD or a branch works too. Goes
-        -- through --verify to fail here rather than at BATES.
-        i(3, 'commit hash'),
         -- Free text, no effect on behavior; it is what you scan for in the
         -- BATES task list, so make it say which scenario you are on.
         i(4, 'job name'),
