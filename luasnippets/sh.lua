@@ -127,11 +127,14 @@ bazel run -c opt //behavior/core_eval/bates/scripts:submit_core_eval_comparison_
   -- Expect prompts (BCE, base job, prediction eval): train_eval_bfm.yaml
   -- enables those tasks and launcher.sh asks whenever stdin is a terminal.
   -- Passing `enabled_tasks=` or `use_base_commit=` here answers them up front.
+  -- `mgbazel` (.functions.sh) because launcher.sh calls the bazel binary, not
+  -- the shell's bazel() wrapper, so a server it starts would escape the
+  -- bazel.slice memory cap. `bce` and `simtest` get the wrapper for free.
   s(
     'btrain',
     fmt(
       [[
-learning/behavior/workflow/launcher.sh \
+mgbazel learning/behavior/workflow/launcher.sh \
 --model=behavior_training \
 --config_path={} \
 email=jke \
@@ -148,7 +151,7 @@ tag={}]],
     'bft',
     fmt(
       [[
-learning/behavior/workflow/launcher.sh \
+mgbazel learning/behavior/workflow/launcher.sh \
 --model=behavior_training \
 --config_path=train_eval/train_eval_bfm_finetune.yaml \
 email=jke \
