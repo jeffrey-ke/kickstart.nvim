@@ -380,12 +380,28 @@ local function claude_ref(start_line, end_line)
   return '@' .. file .. '#L' .. (start_line == end_line and start_line or start_line .. '-' .. end_line)
 end
 
-vim.keymap.set('n', '<leader>yr', function()
-  local line = vim.api.nvim_win_get_cursor(0)[1]
-  local ref = claude_ref(line, line)
+-- `operatorfunc` target: `g@` calls it once the motion completes, with `'[`
+-- and `']` bracketing the lines it covered. Global because 'operatorfunc'
+-- takes a name, not a Lua function.
+function _G.claude_ref_opfunc()
+  local ref = claude_ref(vim.fn.line "'[", vim.fn.line "']")
   vim.fn.setreg('+', ref)
   vim.notify('Copied: ' .. ref, vim.log.levels.INFO)
-end, { desc = 'Yank Claude Code file reference (@file#Lnum; notebook cell and line)' })
+end
+
+-- Operator: takes a motion, like `y` -- `<leader>yrip`, `<leader>yr3j`. A
+-- count typed before it is handed to the motion by Vim, exactly as in `4dj`.
+vim.keymap.set('n', '<leader>yr', function()
+  vim.o.operatorfunc = 'v:lua.claude_ref_opfunc'
+  return 'g@'
+end, { expr = true, desc = 'Yank Claude Code file reference over {motion}' })
+
+-- The `yy` of the operator: `_` is linewise over [count] lines, so
+-- `3<leader>yrr` is this line and the two below it.
+vim.keymap.set('n', '<leader>yrr', function()
+  vim.o.operatorfunc = 'v:lua.claude_ref_opfunc'
+  return 'g@_'
+end, { expr = true, desc = 'Yank Claude Code file reference (@file#Lnum; notebook cell and line)' })
 
 vim.keymap.set('v', '<leader>yr', function()
   local start_line = vim.fn.line 'v'
