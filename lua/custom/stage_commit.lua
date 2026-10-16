@@ -1,24 +1,30 @@
--- :St / :St! / :Com -- stage visual ranges and commit via a floating buffer.
--- :St[range]        stage the lines in {range} (or the current hunk).
--- :St![range]       stage, then open commit popup restricted to current file.
--- :Com              open commit popup for whatever is staged repo-wide.
+-- <leader>g: stage and commit with direct, async git calls (no fugitive).
+--   gs   stage the hunk at the cursor, or the selected lines; on a staged hunk, unstage it
+--   gS   stage the current file          gU  unstage the current file
+--   gc   commit staged, one-line message  gm  commit staged, multi-line popup
+--   gC   stage and commit only the current file, leaving other staged files staged
+--   gw   checkpoint: stage tracked changes + this file, commit "wip: HH:MM"
+--   gu   undo the last commit, keeping its changes staged; refuses once pushed
+--   gd   :Gvdiffsplit on the command line, waiting for a revision
+--   gq   toggle diff mode in every window of the tab, flipping the current window's state
 
 local M = {}
 
-M.popup = { buf = nil, win = nil, restrict_path = nil, msg_tempfile = nil, cwd = nil }
+local ERROR = vim.log.levels.ERROR
 
-local function run_git(args, cwd)
-  local cmd = { 'git' }
-  vim.list_extend(cmd, args)
-  local opts = { text = true }
-  if cwd and cwd ~= '' then
-    opts.cwd = cwd
-  end
-  local result = vim.system(cmd, opts):wait()
-  return result.code, result.stdout or '', result.stderr or ''
+M.popup = { buf = nil, win = nil, msg_tempfile = nil, cwd = nil }
+
+local function notify(msg, level)
+  vim.schedule(function()
+    vim.notify(msg, level or vim.log.levels.INFO)
+  end)
 end
 
+-- The current buffer's file, or nil for a scratch, help, terminal or other non-file buffer.
 local function buf_path()
+  if vim.bo.buftype ~= '' then
+    return nil
+  end
   local p = vim.fn.expand '%:p'
   if p == '' then
     return nil
@@ -26,20 +32,157 @@ local function buf_path()
   return vim.fn.resolve(p)
 end
 
-local function path_dir(path)
-  if not path or path == '' then
-    return nil
-  end
-  return vim.fn.fnamemodify(path, ':h')
+local function repo_cwd(path)
+  return path and vim.fn.fnamemodify(path, ':h') or vim.fn.getcwd()
 end
 
-local function staged_name_status(path, cwd)
-  local args = { 'diff', '--cached', '--name-status' }
-  if path and path ~= '' then
-    table.insert(args, '--')
-    table.insert(args, path)
+-- Async git; on_ok(result) runs on the main loop. A failure notifies git's output instead.
+local function git(args, cwd, on_ok)
+  vim.system(vim.list_extend({ 'git' }, args), { text = true, cwd = cwd }, function(r)
+    if r.code ~= 0 then
+      local out = vim.trim(r.stderr ~= '' and r.stderr or r.stdout)
+      notify(out ~= '' and out or ('git ' .. args[1] .. ' failed'), ERROR)
+      return
+    end
+    if on_ok then
+      vim.schedule(function()
+        on_ok(r)
+      end)
+    end
+  end)
+end
+
+local function notify_committed(msg)
+  return function(r)
+    notify('committed: ' .. msg)
+    -- The pre-commit hook's comment nudge, which never blocks.
+    if vim.trim(r.stderr) ~= '' then
+      notify(vim.trim(r.stderr), vim.log.levels.WARN)
+    end
   end
-  local code, out, _ = run_git(args, cwd)
+end
+
+local function ask_message(prompt, on_msg)
+  vim.ui.input({ prompt = prompt }, function(msg)
+    if not msg or vim.trim(msg) == '' then
+      notify 'commit cancelled'
+      return
+    end
+    on_msg(msg)
+  end)
+end
+
+local function need_file()
+  local path = buf_path()
+  if not path then
+    notify('not a file buffer', ERROR)
+  end
+  return path
+end
+
+function M.stage_hunk(range)
+  require('gitsigns').stage_hunk(range)
+end
+
+function M.stage_file()
+  local path = need_file()
+  if not path then
+    return
+  end
+  vim.cmd 'silent update'
+  git({ 'add', '--', path }, repo_cwd(path), function()
+    notify('staged ' .. vim.fn.fnamemodify(path, ':.'))
+  end)
+end
+
+function M.unstage_file()
+  local path = need_file()
+  if not path then
+    return
+  end
+  git({ 'restore', '--staged', '--', path }, repo_cwd(path), function()
+    notify('unstaged ' .. vim.fn.fnamemodify(path, ':.'))
+  end)
+end
+
+function M.commit_staged()
+  local cwd = repo_cwd(buf_path())
+  ask_message('commit: ', function(msg)
+    git({ 'commit', '-m', msg }, cwd, notify_committed(msg))
+  end)
+end
+
+function M.commit_file()
+  local path = need_file()
+  if not path then
+    return
+  end
+  vim.cmd 'silent update'
+  local cwd = repo_cwd(path)
+  ask_message('commit ' .. vim.fn.fnamemodify(path, ':t') .. ': ', function(msg)
+    -- Once the whole file is staged its working copy is what's committed, so naming it
+    -- commits it alone and leaves other staged files staged.
+    git({ 'add', '--', path }, cwd, function()
+      git({ 'commit', '-m', msg, '--', path }, cwd, notify_committed(msg))
+    end)
+  end)
+end
+
+function M.checkpoint()
+  local path = buf_path()
+  local cwd = repo_cwd(path)
+  vim.cmd 'silent! wall'
+  local msg = 'wip: ' .. os.date '%H:%M'
+  local function commit()
+    git({ 'commit', '-m', msg }, cwd, notify_committed(msg))
+  end
+  git({ 'add', '-u' }, cwd, function()
+    if path then
+      git({ 'add', '--', path }, cwd, commit)
+    else
+      commit()
+    end
+  end)
+end
+
+function M.uncommit()
+  local cwd = repo_cwd(buf_path())
+  git({ 'log', '-1', '--format=%s' }, cwd, function(log)
+    local subject = vim.trim(log.stdout)
+    -- Exit 0: HEAD is already on the upstream. 1: it isn't. 128: no upstream at all.
+    vim.system({ 'git', 'merge-base', '--is-ancestor', 'HEAD', '@{u}' }, { cwd = cwd }, function(r)
+      if r.code == 0 then
+        notify('HEAD is pushed; not undoing "' .. subject .. '"', ERROR)
+        return
+      end
+      git({ 'reset', '--soft', 'HEAD~1' }, cwd, function()
+        notify('undid "' .. subject .. '"; its changes are staged')
+      end)
+    end)
+  end)
+end
+
+-- The current window decides the direction; every window in the tab follows it, whatever
+-- mix of diff states they were in.
+function M.toggle_diff()
+  if vim.wo.diff then
+    vim.cmd 'diffoff!'
+    return
+  end
+  local win = vim.api.nvim_get_current_win()
+  vim.cmd 'windo diffthis'
+  vim.api.nvim_set_current_win(win)
+end
+
+-- ---- gm: the multi-line popup. Synchronous, so :wq quits only after git commit succeeds. ----
+
+local function run_git(args, cwd)
+  local result = vim.system(vim.list_extend({ 'git' }, args), { text = true, cwd = cwd }):wait()
+  return result.code, result.stdout or '', result.stderr or ''
+end
+
+local function staged_name_status(cwd)
+  local code, out, _ = run_git({ 'diff', '--cached', '--name-status' }, cwd)
   if code ~= 0 then
     return {}
   end
@@ -58,40 +201,11 @@ local function current_branch(cwd)
   return (out:gsub('\n', ''))
 end
 
-local function staged_diff(path, cwd)
-  local args = { 'diff', '--cached' }
-  if path and path ~= '' then
-    table.insert(args, '--')
-    table.insert(args, path)
-  end
-  local _, out, _ = run_git(args, cwd)
-  return out
-end
-
-local function stage_range(line1, line2, has_range)
-  local ok, gitsigns = pcall(require, 'gitsigns')
-  if not ok then
-    vim.notify('gitsigns not available', vim.log.levels.ERROR)
-    return false
-  end
-  local cwd = path_dir(buf_path())
-  local before = staged_diff(nil, cwd)
-  if has_range then
-    gitsigns.stage_hunk { line1, line2 }
-  else
-    gitsigns.stage_hunk()
-  end
-  -- gitsigns.stage_hunk is async; block briefly until the index actually changes.
-  return vim.wait(2000, function()
-    return staged_diff(nil, cwd) ~= before
-  end, 30)
-end
-
 local function reset_state()
   if M.popup.msg_tempfile then
     os.remove(M.popup.msg_tempfile)
   end
-  M.popup = { buf = nil, win = nil, restrict_path = nil, msg_tempfile = nil, cwd = nil }
+  M.popup = { buf = nil, win = nil, msg_tempfile = nil, cwd = nil }
 end
 
 local function strip_comments_and_blanks(lines)
@@ -113,14 +227,14 @@ local function on_write()
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   local stripped = strip_comments_and_blanks(lines)
   if #stripped == 0 then
-    vim.notify('empty commit message', vim.log.levels.ERROR)
+    vim.notify('empty commit message', ERROR)
     return
   end
 
   local tempfile = vim.fn.tempname()
   local fd = io.open(tempfile, 'w')
   if not fd then
-    vim.notify('failed to write temp commit file', vim.log.levels.ERROR)
+    vim.notify('failed to write temp commit file', ERROR)
     return
   end
   fd:write(table.concat(lines, '\n'))
@@ -128,26 +242,21 @@ local function on_write()
   fd:close()
   M.popup.msg_tempfile = tempfile
 
-  local args = { 'commit', '-F', tempfile }
-  local code, _, err = run_git(args, M.popup.cwd)
+  local code, _, err = run_git({ 'commit', '-F', tempfile }, M.popup.cwd)
   if code == 0 then
     vim.bo[buf].modified = false
     vim.notify('committed: ' .. stripped[1], vim.log.levels.INFO)
   else
-    local msg = err ~= '' and err or 'git commit failed'
-    vim.notify(msg, vim.log.levels.ERROR)
+    vim.notify(err ~= '' and err or 'git commit failed', ERROR)
     -- leave modified=true so :wq blocks; user can edit and retry, or :q!
   end
 end
 
-local function open_commit_popup(opts)
-  opts = opts or {}
-  local path = opts.path
-  local cwd = path_dir(path) or vim.fn.getcwd()
+function M.commit_popup()
+  local cwd = repo_cwd(buf_path())
 
-  if #staged_name_status(path, cwd) == 0 then
-    local suffix = path and (' for ' .. vim.fn.fnamemodify(path, ':t')) or ''
-    vim.notify('nothing staged' .. suffix, vim.log.levels.WARN)
+  if #staged_name_status(cwd) == 0 then
+    vim.notify('nothing staged', vim.log.levels.WARN)
     return
   end
 
@@ -165,11 +274,8 @@ local function open_commit_popup(opts)
 
   local body = { '', '' }
   table.insert(body, '# branch: ' .. current_branch(cwd))
-  if path then
-    table.insert(body, '# committing only changes to: ' .. vim.fn.fnamemodify(path, ':.'))
-  end
   table.insert(body, '# files to commit:')
-  for _, line in ipairs(staged_name_status(path, cwd)) do
+  for _, line in ipairs(staged_name_status(cwd)) do
     table.insert(body, '# ' .. line)
   end
   table.insert(body, '#')
@@ -179,14 +285,12 @@ local function open_commit_popup(opts)
 
   local width = math.min(80, math.floor(vim.o.columns * 0.8))
   local height = math.min(15, math.max(8, math.floor(vim.o.lines * 0.5)))
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
   local win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor',
     width = width,
     height = height,
-    row = row,
-    col = col,
+    row = math.floor((vim.o.lines - height) / 2),
+    col = math.floor((vim.o.columns - width) / 2),
     border = 'rounded',
     title = ' commit ',
     style = 'minimal',
@@ -194,42 +298,36 @@ local function open_commit_popup(opts)
 
   M.popup.buf = buf
   M.popup.win = win
-  M.popup.restrict_path = path
   M.popup.msg_tempfile = nil
   M.popup.cwd = cwd
 
-  vim.api.nvim_create_autocmd('BufWriteCmd', {
-    buffer = buf,
-    callback = on_write,
-  })
-  vim.api.nvim_create_autocmd('BufWipeout', {
-    buffer = buf,
-    callback = reset_state,
-  })
+  vim.api.nvim_create_autocmd('BufWriteCmd', { buffer = buf, callback = on_write })
+  vim.api.nvim_create_autocmd('BufWipeout', { buffer = buf, callback = reset_state })
 
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
   vim.cmd 'startinsert'
 end
 
 function M.setup()
-  vim.api.nvim_create_user_command('St', function(opts)
-    local staged = stage_range(opts.line1, opts.line2, opts.range > 0)
-    if opts.bang then
-      if not staged then
-        vim.notify('staging did not take effect within timeout', vim.log.levels.WARN)
-        return
-      end
-      open_commit_popup { path = buf_path() }
-    end
-  end, {
-    range = true,
-    bang = true,
-    desc = 'Stage hunk(s); ! also commits, path-restricted to current file',
-  })
-
-  vim.api.nvim_create_user_command('Com', function()
-    open_commit_popup { path = nil }
-  end, { desc = 'Open commit message popup for staged changes' })
+  local function map(mode, lhs, rhs, desc)
+    vim.keymap.set(mode, lhs, rhs, { desc = desc })
+  end
+  map('n', '<leader>gs', function()
+    M.stage_hunk()
+  end, 'Git stage/unstage hunk')
+  map('x', '<leader>gs', function()
+    M.stage_hunk { vim.fn.line '.', vim.fn.line 'v' }
+  end, 'Git stage selected lines')
+  map('n', '<leader>gS', M.stage_file, 'Git stage file')
+  map('n', '<leader>gU', M.unstage_file, 'Git unstage file')
+  map('n', '<leader>gc', M.commit_staged, 'Git commit staged (one line)')
+  map('n', '<leader>gm', M.commit_popup, 'Git commit staged (message popup)')
+  map('n', '<leader>gC', M.commit_file, 'Git commit this file only')
+  map('n', '<leader>gw', M.checkpoint, 'Git wip checkpoint')
+  map('n', '<leader>gu', M.uncommit, 'Git undo last commit, keep changes')
+  -- Left on the command line: type a revision, or <CR> alone to diff against the index.
+  map('n', '<leader>gd', ':Gvdiffsplit ', 'Git vdiff against a revision')
+  map('n', '<leader>gq', M.toggle_diff, 'Diff mode toggle for every window of the tab')
 end
 
 return M

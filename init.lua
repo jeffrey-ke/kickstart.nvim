@@ -777,6 +777,7 @@ require('lazy').setup({
       -- Document existing key chains
       spec = {
         { '<leader>c', group = 'Quickfix' },
+        { '<leader>g', group = '[G]it stage/commit', mode = { 'n', 'x' } },
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
@@ -1730,6 +1731,18 @@ local function reload_snippets()
 end
 vim.api.nvim_create_user_command('ReloadSnippets', reload_snippets, { desc = 'Re-read luasnippets/*.lua from disk' })
 vim.keymap.set('n', '<leader>rs', reload_snippets, { desc = '[R]eload [S]nippets' })
+
+-- Re-sourcing init.lua can't reload this config: lazy.nvim refuses a second setup and
+-- require() keeps the old modules. :restart starts a fresh nvim in this terminal instead, and
+-- the session brings back its tabs, windows and buffers. Quickfix lists and undo history
+-- (undofile is off) don't survive.
+local function restart_nvim()
+  vim.cmd 'wall'
+  local session = vim.fn.fnameescape(vim.fn.stdpath 'state' .. '/restart_session.vim')
+  vim.cmd('mksession! ' .. session)
+  vim.cmd('restart source ' .. session)
+end
+vim.keymap.set('n', '<leader>rc', restart_nvim, { desc = '[R]estart nvim, keeping the session ([C]onfig reload)' })
 
 -- Cycle a LuaSnip choice node (`c()`), e.g. the blocking / priority / tier
 -- fields of luasnippets/sh.lua's `repriori`. Not a completion item: blink's
