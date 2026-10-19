@@ -627,6 +627,22 @@ local function rg_base()
   return { 'rg', '--vimgrep', '--max-filesize', '1M', '-j', tostring(vim.uv.available_parallelism()) }
 end
 
+-- A search before it is a command line, so rg and the index fallback
+-- (custom.index_grep) can each spell it their own way:
+--
+--   query = { pattern, dir, types = rg types | nil, globs = rg globs | nil }
+local function rg_argv(query)
+  local argv = rg_base()
+  for _, rg_type in ipairs(query.types or {}) do
+    vim.list_extend(argv, { '--type', rg_type })
+  end
+  for _, glob in ipairs(query.globs or {}) do
+    vim.list_extend(argv, { '--glob', glob })
+  end
+  vim.list_extend(argv, { '--', query.pattern, query.dir })
+  return argv
+end
+
 -- A `.h` is filetype `c` or `cpp` depending on detection, and rg's `c` type does
 -- not cover `*.cc` -- pass both so a search started in a header still reaches the
 -- definition in the source file. Four alternatives:
@@ -677,20 +693,34 @@ local locations = require 'custom.locations'
 
 -- rg runs off the event loop, so the list is filled after this returns. The
 -- window is captured now because the user may have moved by the time rg
--- finishes; the load jumps and opens there without taking focus. No matches
--- leaves the window's previous list in place. `refine`, optional, reorders or
--- filters the matches before they are loaded.
-local function grep_into_loclist(argv, open_list, refine)
-  local title = table.concat(argv, ' ')
+-- finishes; the load jumps and opens there without taking focus. When rg finds
+-- nothing, the git index is searched for the files the working tree lacks (see
+-- custom.index_grep). No matches leaves the window's previous list in place.
+-- `refine`, optional, reorders or filters the matches before they are loaded.
+local function grep_into_loclist(query, open_list, refine)
+  local title = table.concat(rg_argv(query), ' ')
   local win = vim.api.nvim_get_current_win()
-  require('custom.rg').search(argv, function(found, err)
-    if err then
-      vim.notify('rg failed: ' .. err, vim.log.levels.ERROR)
-    elseif #found == 0 then
-      vim.notify('No matches: ' .. title, vim.log.levels.WARN)
-    elseif vim.api.nvim_win_is_valid(win) then
-      locations.load(refine and refine(found) or found, { win = win, title = title, open = open_list })
+  local function show(found, list_title)
+    if vim.api.nvim_win_is_valid(win) then
+      locations.load(refine and refine(found) or found, { win = win, title = list_title, open = open_list })
     end
+  end
+  require('custom.rg').search(rg_argv(query), function(found, err)
+    if err then
+      return vim.notify('rg failed: ' .. err, vim.log.levels.ERROR)
+    end
+    if #found > 0 then
+      return show(found, title)
+    end
+    require('custom.index_grep').search(query, function(indexed, index_err)
+      if index_err then
+        vim.notify('git grep failed: ' .. index_err, vim.log.levels.ERROR)
+      elseif #indexed == 0 then
+        vim.notify('No matches: ' .. title, vim.log.levels.WARN)
+      else
+        show(indexed, 'git index: ' .. title)
+      end
+    end)
   end)
 end
 
@@ -703,13 +733,8 @@ local function bodies_first(word)
   end
 end
 
-local function excluded_argv(pattern, dir)
-  local argv = rg_base()
-  for _, glob in ipairs(grep_excludes) do
-    vim.list_extend(argv, { '--glob', glob })
-  end
-  vim.list_extend(argv, { '--', pattern, dir })
-  return argv
+local function excluded_query(pattern, dir)
+  return { pattern = pattern, dir = dir, globs = grep_excludes }
 end
 
 -- Unfiltered, a definition or call search reads every file in the monorepo to
@@ -720,28 +745,21 @@ end
 --
 -- `patterns` maps a filetype to its pattern, NAME standing in for the escaped
 -- word; `patterns.generic` serves every filetype without one.
-local function filetype_bound_argv(patterns, word, dir)
+local function filetype_bound_query(patterns, word, dir)
   local escaped = escape_regex(word)
   local pattern = (patterns[vim.bo.filetype] or patterns.generic):gsub('NAME', function()
     return escaped
   end)
   local search = definition_search[vim.bo.filetype]
   if search then
-    local argv = rg_base()
-    for _, rg_type in ipairs(search.types) do
-      vim.list_extend(argv, { '--type', rg_type })
-    end
-    vim.list_extend(argv, { '--', pattern, dir })
-    return argv
+    return { pattern = pattern, dir = dir, types = search.types }
   end
 
   local ext = vim.fn.expand '%:e'
   if ext == '' then
-    return excluded_argv(pattern, dir)
+    return excluded_query(pattern, dir)
   end
-  local argv = rg_base()
-  vim.list_extend(argv, { '--glob', '*.' .. ext, '--', pattern, dir })
-  return argv
+  return { pattern = pattern, dir = dir, globs = { '*.' .. ext } }
 end
 
 local definition_patterns = { generic = [[(function|local|const|let|var|def|class)\s+NAME\b]] }
@@ -749,8 +767,8 @@ for filetype, search in pairs(definition_search) do
   definition_patterns[filetype] = search.pattern
 end
 
-local function definition_argv(word, dir)
-  return filetype_bound_argv(definition_patterns, word, dir)
+local function definition_query(word, dir)
+  return filetype_bound_query(definition_patterns, word, dir)
 end
 
 -- A call is the name followed by its argument list. Each pattern also matches
@@ -769,8 +787,8 @@ local call_patterns = {
   sh = [[(^|[;&|({\x60]|\b(then|do|else|if|elif|while|until|exec|time|command))\s*NAME(\s|;|\)|$)]],
 }
 
-local function call_argv(word, dir)
-  return filetype_bound_argv(call_patterns, word, dir)
+local function call_query(word, dir)
+  return filetype_bound_query(call_patterns, word, dir)
 end
 
 -- The definition of the word under the cursor, from the first of these with
@@ -786,19 +804,19 @@ end
 --   4. The grep.
 --
 -- jedi answers asynchronously, so everything the later steps need -- window,
--- word, the grep's filetype-bound argv -- is read at the keypress.
+-- word, the grep's filetype-bound query -- is read at the keypress.
 local function definition_at_cursor(open_list)
   local win = vim.api.nvim_get_current_win()
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor = vim.api.nvim_win_get_cursor(win)
   local word = vim.fn.expand '<cword>'
-  local argv = definition_argv(word, '.')
+  local query = definition_query(word, '.')
   local found, name, imported = require('custom.local_def').at_cursor()
 
   local function scope_or_grep()
     if not locations.load(found, { win = win, title = 'local definition of ' .. (name or ''), open = open_list and #found > 1 }) then
       vim.api.nvim_win_call(win, function()
-        grep_into_loclist(argv, open_list, bodies_first(word))
+        grep_into_loclist(query, open_list, bodies_first(word))
       end)
     end
   end
@@ -827,7 +845,7 @@ vim.api.nvim_create_user_command('Def', function(opts)
   if args[1] == '' then
     return definition_at_cursor(false)
   end
-  grep_into_loclist(definition_argv(args[1], args[2] or '.'), false, bodies_first(args[1]))
+  grep_into_loclist(definition_query(args[1], args[2] or '.'), false, bodies_first(args[1]))
 end, { nargs = '*', desc = 'Find definition: :Def [name] [dir]' })
 
 vim.api.nvim_create_user_command('D', function(opts)
@@ -884,8 +902,8 @@ local function callers_into_loclist(word, dir)
     end
   end
 
-  for key, argv in pairs { calls = call_argv(word, dir), definitions = definition_argv(word, dir) } do
-    require('custom.rg').search(argv, function(found, err)
+  for key, query in pairs { calls = call_query(word, dir), definitions = definition_query(word, dir) } do
+    require('custom.rg').search(rg_argv(query), function(found, err)
       results[key], failure = found, failure or err
       finish()
     end)
@@ -926,7 +944,7 @@ end, { nargs = '?', desc = 'Alias for :VGr' })
 
 vim.api.nvim_create_user_command('Gr', function(opts)
   local pattern = opts.args ~= '' and opts.args or vim.fn.expand '<cword>'
-  grep_into_loclist(excluded_argv(pattern, '.'), true)
+  grep_into_loclist(excluded_query(pattern, '.'), true)
 end, { nargs = '?', desc = 'Grep (defaults to word under cursor)' })
 
 -- Substitutes across the files of the list `:Gr` just filled -- this window's
