@@ -167,6 +167,30 @@ end, { desc = '[T]oggle [S]pell' })
 -- motion); <C-f>'s only stock insert-mode job is reindenting the current line.
 vim.keymap.set('i', '<C-f>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
 
+-- Blocks until `argv` exits. Runs from the buffer's directory; stdout goes in
+-- after the cursor, lines space-joined. A nonzero exit or no output inserts nothing.
+-- See lua/README.md for the pattern.
+local function insert_command_output(argv)
+  local dir = vim.fn.expand '%:p:h'
+  local result = vim.system(argv, { cwd = vim.fn.isdirectory(dir) == 1 and dir or nil }):wait()
+  local lines = vim.split(vim.trim(result.stdout), '\n', { trimempty = true })
+  if result.code == 0 and #lines > 0 then
+    vim.api.nvim_put({ table.concat(lines, ' ') }, 'c', true, true)
+  end
+end
+
+-- The shell's fzf-git.sh pickers, keyed like its C-g bindings. `--run <picker>`
+-- opens the same popup and prints the pick, trimmed to the bare hash, branch
+-- or path. The buffer's directory picks the repo, so a file from another
+-- worktree lists that worktree. Native <C-g> (file info) now waits out
+-- 'timeoutlen' first.
+local fzf_git_script = vim.fn.expand '~/dotfiles/fzf-git.sh/fzf-git.sh'
+for key, picker in pairs { b = 'branches', e = 'each_ref', f = 'files', h = 'hashes', l = 'lreflogs', r = 'remotes', s = 'stashes', t = 'tags', w = 'worktrees' } do
+  vim.keymap.set('n', '<C-g>' .. key, function()
+    insert_command_output { 'bash', fzf_git_script, '--run', picker }
+  end, { desc = 'fzf-git: insert ' .. picker })
+end
+
 -- Fold keymaps
 local function_types = { 'function_definition', 'function_declaration', 'method_definition', 'method_declaration', 'arrow_function', 'function' }
 
