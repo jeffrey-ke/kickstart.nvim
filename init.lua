@@ -1737,7 +1737,25 @@ vim.keymap.set('n', '<leader>rs', reload_snippets, { desc = '[R]eload [S]nippets
 -- the session brings back its tabs, windows and buffers. Quickfix lists and undo history
 -- (undofile is off) don't survive.
 local function restart_nvim()
-  vim.cmd 'wall'
+  local unnamed = {}
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[buf].modified and vim.bo[buf].buftype == '' and vim.api.nvim_buf_get_name(buf) == '' then
+      table.insert(unnamed, buf)
+    end
+  end
+  if #unnamed > 0 then
+    local nrs = table.concat(unnamed, ' ')
+    vim.notify(
+      ('Not restarting: unnamed buffer(s) %s have unsaved changes that :wall cannot write. `:w <file>` to keep them, or `:bd! %s` to discard.'):format(nrs, nrs),
+      vim.log.levels.WARN
+    )
+    return
+  end
+  local ok, err = pcall(vim.cmd, 'wall')
+  if not ok then
+    vim.notify('Not restarting, :wall failed: ' .. (err:match 'E%d+: .*' or err), vim.log.levels.WARN)
+    return
+  end
   local session = vim.fn.fnameescape(vim.fn.stdpath 'state' .. '/restart_session.vim')
   vim.cmd('mksession! ' .. session)
   vim.cmd('restart source ' .. session)
