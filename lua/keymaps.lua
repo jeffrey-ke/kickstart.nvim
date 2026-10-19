@@ -712,34 +712,65 @@ local function excluded_argv(pattern, dir)
   return argv
 end
 
--- Unfiltered, a definition search reads every file in the monorepo to answer a
--- question about a single language -- 3.3 GB and ~13 s cold -- so always bound
--- the walk: by rg type when the filetype is known, else by the current file's
--- extension. The traversal itself is not the cost (0.12 s cold for the same
+-- Unfiltered, a definition or call search reads every file in the monorepo to
+-- answer a question about a single language -- 3.3 GB and ~13 s cold -- so
+-- always bound the walk: by rg type when the filetype is known, else by the
+-- current file's extension. The traversal itself is not the cost (0.12 s cold for the same
 -- tree); the bytes are. --type py alone takes the same search to 1 s.
-local function definition_argv(word, dir)
+--
+-- `patterns` maps a filetype to its pattern, NAME standing in for the escaped
+-- word; `patterns.generic` serves every filetype without one.
+local function filetype_bound_argv(patterns, word, dir)
   local escaped = escape_regex(word)
+  local pattern = (patterns[vim.bo.filetype] or patterns.generic):gsub('NAME', function()
+    return escaped
+  end)
   local search = definition_search[vim.bo.filetype]
   if search then
     local argv = rg_base()
     for _, rg_type in ipairs(search.types) do
       vim.list_extend(argv, { '--type', rg_type })
     end
-    local pattern = search.pattern:gsub('NAME', function()
-      return escaped
-    end)
     vim.list_extend(argv, { '--', pattern, dir })
     return argv
   end
 
-  local generic = ('(function|local|const|let|var|def|class)\\s+%s\\b'):format(escaped)
   local ext = vim.fn.expand '%:e'
   if ext == '' then
-    return excluded_argv(generic, dir)
+    return excluded_argv(pattern, dir)
   end
   local argv = rg_base()
-  vim.list_extend(argv, { '--glob', '*.' .. ext, '--', generic, dir })
+  vim.list_extend(argv, { '--glob', '*.' .. ext, '--', pattern, dir })
   return argv
+end
+
+local definition_patterns = { generic = [[(function|local|const|let|var|def|class)\s+NAME\b]] }
+for filetype, search in pairs(definition_search) do
+  definition_patterns[filetype] = search.pattern
+end
+
+local function definition_argv(word, dir)
+  return filetype_bound_argv(definition_patterns, word, dir)
+end
+
+-- A call is the name followed by its argument list. Each pattern also matches
+-- the line defining the name -- `def f(`, `void F(int) {` -- so
+-- callers_into_loclist subtracts the definition search's hits; excluding them
+-- here would need a lookahead, which costs PCRE2. C++ may put template
+-- arguments in between, Lua may pass a lone string or table, and a shell
+-- function is called as a command: after a separator or a keyword, not before
+-- a `(`.
+local cpp_call = [[\bNAME\s*(<[\w:<>,*& ]*>\s*)?\(]]
+local call_patterns = {
+  generic = [[\bNAME\s*\(]],
+  c = cpp_call,
+  cpp = cpp_call,
+  lua = [[\bNAME\s*([({"']|\[\[)]],
+  sh = [[(^|[;&|({\x60]|\b(then|do|else|if|elif|while|until|exec|time|command))\s*NAME(\s|;|\)|$)]],
+}
+
+local function call_argv(word, dir)
+  return filetype_bound_argv(call_patterns, word, dir)
 end
 
 -- The definition of the word under the cursor, from the first of these with
@@ -820,6 +851,69 @@ end, { nargs = '*', desc = 'Hsplit + :Def' })
 vim.api.nvim_create_user_command('Sd', function(opts)
   vim.cmd('SDef ' .. opts.args)
 end, { nargs = '*', desc = 'Alias for :SDef' })
+
+-- The call grep and the definition grep run side by side, and a line the
+-- definition grep also found is dropped: it declares the name, it does not
+-- call it. The definition hits lose their statements first, since the C++
+-- member pattern admits `return F(x);`, which is a call. Like any grep, a
+-- same-named function elsewhere counts too.
+local function callers_into_loclist(word, dir)
+  local win = vim.api.nvim_get_current_win()
+  local title = 'calls of ' .. word
+  local results, failure, pending = {}, nil, 2
+
+  local function finish()
+    pending = pending - 1
+    if pending > 0 then
+      return
+    end
+    if failure then
+      return vim.notify('rg failed: ' .. failure, vim.log.levels.ERROR)
+    end
+    local definitions = {}
+    for _, location in ipairs(require('custom.local_def.rank').without_statements(results.definitions, word)) do
+      definitions[location.filename .. ':' .. location.lnum] = true
+    end
+    local calls = vim.tbl_filter(function(location)
+      return not definitions[location.filename .. ':' .. location.lnum]
+    end, results.calls)
+    if #calls == 0 then
+      vim.notify('No calls: ' .. word, vim.log.levels.WARN)
+    elseif vim.api.nvim_win_is_valid(win) then
+      locations.load(calls, { win = win, title = title, open = true })
+    end
+  end
+
+  for key, argv in pairs { calls = call_argv(word, dir), definitions = definition_argv(word, dir) } do
+    require('custom.rg').search(argv, function(found, err)
+      results[key], failure = found, failure or err
+      finish()
+    end)
+  end
+end
+
+vim.keymap.set('n', 'gC', function()
+  callers_into_loclist(vim.fn.expand '<cword>', '.')
+end, { desc = 'Calls of word under cursor (grep)' })
+
+vim.api.nvim_create_user_command('Call', function(opts)
+  local args = vim.split(opts.args, '%s+')
+  callers_into_loclist(args[1] ~= '' and args[1] or vim.fn.expand '<cword>', args[2] or '.')
+end, { nargs = '*', desc = 'Find calls: :Call [name] [dir]' })
+
+-- `:Ca` alone is ambiguous with `:Catppuccin`. Only a bare `:Ca` expands, so
+-- the letters stay as typed anywhere else on a command line.
+vim.cmd [[cnoreabbrev <expr> Ca getcmdtype() == ':' && getcmdline() ==# 'Ca' ? 'Call' : 'Ca']]
+
+vim.api.nvim_create_user_command('VCall', function(opts)
+  vim.cmd 'vsplit'
+  vim.cmd('Call ' .. opts.args)
+end, { nargs = '*', desc = 'Vsplit + :Call' })
+
+vim.api.nvim_create_user_command('SCall', function(opts)
+  vim.cmd 'split'
+  vim.cmd('Call ' .. opts.args)
+end, { nargs = '*', desc = 'Hsplit + :Call' })
 
 vim.api.nvim_create_user_command('VGr', function(opts)
   vim.cmd 'vsplit'
