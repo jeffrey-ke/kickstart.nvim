@@ -5,7 +5,7 @@
 -- screenpos(), so there is no offset to pan with. Zooming therefore happens on the source:
 -- crop a region with ImageMagick and swap it under the existing Image object, which reloads
 -- whenever `original_path` is newer than `last_modified` (image/image.lua:57). image.nvim
--- then scales that crop to the window, which is the zoom.
+-- then scales that crop up to the size `apply` asks for, which is the zoom.
 
 local ZOOM_STEP = 1.25
 local MAX_ZOOM = 32
@@ -60,31 +60,44 @@ local function view_for(buf, image)
   return views[buf]
 end
 
-local function show(image, path)
-  local win = vim.api.nvim_get_current_win()
+---@param columns number  size to draw at, in cells
+---@param rows number
+local function show(image, path, columns, rows)
   image.original_path = path
   image.last_modified = -1
-  image:render {
-    width = vim.api.nvim_win_get_width(win),
-    height = vim.api.nvim_win_get_height(win),
-  }
+  image:render { width = math.max(1, columns), height = math.max(1, rows) }
 end
 
 local function apply(buf, view)
   local image = current_image(buf)
   if not image then return end
+  local term = require('image/utils').term.get_size()
+  if not term then return end
 
-  if view.zoom <= 1 then
-    view.zoom, view.cx, view.cy = 1, 0.5, 0.5
-    if view.cropped then
-      show(image, view.source)
-      view.cropped = false
-    end
+  if view.zoom <= 1 then view.zoom, view.cx, view.cy = 1, 0.5, 0.5 end
+
+  -- Zoom scales the drawn image, and the window is a viewport onto it: the picture grows
+  -- until it fills the window along an axis, and only past that is that axis cropped.
+  -- Cropping to the source's aspect instead would keep a letterboxed image in its
+  -- original box forever. Zoom 1 is what image.nvim draws unasked, native size shrunk to
+  -- fit, so the first `+` continues from what is on screen.
+  local win = vim.api.nvim_get_current_win()
+  local win_width = vim.api.nvim_win_get_width(win) * term.cell_width
+  local win_height = vim.api.nvim_win_get_height(win) * term.cell_height
+  local scale = math.min(1, win_width / view.width, win_height / view.height) * view.zoom -- screen px per source px
+
+  local crop_width = clamp(math.floor(win_width / scale), 16, view.width)
+  local crop_height = clamp(math.floor(win_height / scale), 16, view.height)
+  local columns = math.floor(crop_width * scale / term.cell_width)
+  local rows = math.floor(crop_height * scale / term.cell_height)
+
+  if crop_width == view.width and crop_height == view.height then
+    view.cx, view.cy = 0.5, 0.5
+    show(image, view.source, columns, rows)
+    view.cropped = false
     return
   end
 
-  local crop_width = math.max(16, math.floor(view.width / view.zoom))
-  local crop_height = math.max(16, math.floor(view.height / view.zoom))
   local x = clamp(math.floor(view.cx * view.width - crop_width / 2 + 0.5), 0, view.width - crop_width)
   local y = clamp(math.floor(view.cy * view.height - crop_height / 2 + 0.5), 0, view.height - crop_height)
   -- fold the clamp back in, so panning into an edge doesn't bank offset to undo later
@@ -106,7 +119,7 @@ local function apply(buf, view)
     return
   end
 
-  show(image, crop)
+  show(image, crop, columns, rows)
   view.cropped = true
 end
 
@@ -144,7 +157,7 @@ local function attach(buf)
   map('<C-ScrollWheelDown>', zoom_by(1 / ZOOM_STEP), 'Zoom out')
   map('0', function(view)
     view.zoom = 1
-  end, 'Fit to window')
+  end, 'Reset zoom')
 
   map('h', pan_by(-1, 0), 'Pan left')
   map('l', pan_by(1, 0), 'Pan right')
