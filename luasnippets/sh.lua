@@ -262,6 +262,34 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
       i(2, '30'),
     })
   ),
+  -- `ndfaudio`: pull the mic audio behind each sim NDF from its onboard log,
+  -- with the run id and window split off the NDF's name by `ndfscene`, a
+  -- private shell function. The NDF stop takes gs:// paths or
+  -- nurolog:// links, whitespace-separated, so a
+  -- `$(bce JOB | xargs ndfpairs | cut -d' ' -f1)` fits there too; base and
+  -- branch share the log, so one side is enough. Each NDF gets its own
+  -- subdirectory because extract_audio_v2 writes a fixed <sensor_id>.wav per
+  -- mic, which would overwrite across scenes. The output dir is made absolute
+  -- up front: bazel run starts the binary in its runfiles tree, not here. A
+  -- `for` over the list rather than piping ndfscene into `while read`, whose
+  -- stdin bazel run would eat.
+  s(
+    'ndfaudio',
+    fmt(
+      [[
+out=$(realpath -m {}) && \
+for ndf in {}; do
+  read -r run start end < <(ndfscene "$ndf") && \
+  mkdir -p "$out/${{run}}_${{start}}_${{end}}" && \
+  bazel run -c opt //perception/audio:extract_audio_v2 -- \
+  --blob "$run" \
+  --start_ts "$start" \
+  --end_ts "$end" \
+  --output_path "$out/${{run}}_${{start}}_${{end}}" || break
+done]],
+      { i(2, 'output dir'), i(1, 'ndf paths or nurolog:// links') }
+    )
+  ),
   -- `repriori`: build one row for the BATES GW prioritization sheet and leave it on
   -- the system clipboard, ready to paste into the leftmost empty cell of a new
   -- row -- Sheets splits pasted text on tabs, so one paste fills the row. The
