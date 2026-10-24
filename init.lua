@@ -370,11 +370,10 @@ vim.opt.fillchars:append { foldopen = '▾', foldclose = '▸', foldsep = ' ' }
 -- in the theme below, so the distinction is invisible until one of them changes.
 vim.opt.statuscolumn = '%C%#FoldColumn#%{foldclosed(v:lnum)==v:lnum ? foldlevel(v:lnum) : " "}%s%=%l '
 
--- No wrapping: a long line runs off the right edge rather than spilling onto
--- screen lines, so a buffer line is always one display line. `linebreak` stays
--- set so that anywhere wrap is turned back on per-buffer (`:setlocal wrap`) it
--- breaks at word boundaries rather than mid-word.
-vim.opt.wrap = false
+-- Wrap everywhere except markdown (see the 'nowrap-markdown' FileType rule), so a
+-- long line spills onto screen lines rather than running off the right edge.
+-- `linebreak` makes it break at word boundaries rather than mid-word.
+vim.opt.wrap = true
 vim.opt.linebreak = true
 
 -- Automatically reload files changed outside of nvim
@@ -520,6 +519,18 @@ vim.api.nvim_create_autocmd('FileType', {
   pattern = { 'tex', 'plaintex', 'markdown', 'text', 'gitcommit', 'rst' },
   callback = function()
     vim.opt_local.spell = true
+  end,
+})
+
+-- Markdown is the one filetype left unwrapped. 'wrap' is window-local, so a
+-- non-markdown buffer later :edit'ed into the same window gets the global
+-- `wrap` back rather than inheriting this.
+vim.api.nvim_create_autocmd('FileType', {
+  desc = 'Disable wrapping in markdown buffers',
+  group = vim.api.nvim_create_augroup('nowrap-markdown', { clear = true }),
+  pattern = 'markdown',
+  callback = function()
+    vim.opt_local.wrap = false
   end,
 })
 
