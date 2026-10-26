@@ -196,9 +196,21 @@ function _G.custom_tabline()
 end
 vim.o.tabline = '%!v:lua.custom_tabline()'
 
--- Open the current buffer in a new tab, cursor and view kept. `<C-w>T` instead
--- *moves* the window out, and Telescope's <C-t> opens a picked entry in a tab.
-vim.keymap.set('n', '<leader>T', '<cmd>tab split<CR>', { desc = 'Open buffer in new [T]ab' })
+-- Open the current buffer in a new tab, cursor and view kept -- or, if any
+-- windows of this tab are marked (<C-w>m), copies of those in their arrangement.
+-- `<C-w>T` instead *moves* the window out, and Telescope's <C-t> opens a picked
+-- entry in a tab.
+vim.keymap.set('n', '<leader>T', function()
+  require('custom.tab_take').open()
+end, { desc = 'Open buffer (or marked windows) in new [T]ab' })
+-- Window marks: a flag on a split for later commands to act on (custom/winmark.lua).
+-- Neither key is a built-in CTRL-W command.
+vim.keymap.set('n', '<C-w>m', function()
+  require('custom.winmark').toggle()
+end, { desc = 'Toggle window [m]ark' })
+vim.keymap.set('n', '<C-w>M', function()
+  require('custom.winmark').clear()
+end, { desc = 'Clear window [M]arks in this tab' })
 -- Close the tab and all its windows; the buffers stay loaded. Errors (E784) on
 -- the last tab rather than quitting nvim.
 vim.keymap.set('n', '<leader>Q', '<cmd>tabclose<CR>', { desc = 'Close tab ([Q]uit its windows)' })
