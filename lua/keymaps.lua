@@ -24,6 +24,28 @@ vim.keymap.set('n', '<leader>*', function()
   vim.opt.hlsearch = true
 end, { desc = 'Highlight all matches of word under cursor (no jump)' })
 
+-- Move the selected lines, then reselect and re-indent them. With a count, the
+-- count is the relativenumber gutter's: `NJ` puts the selection below the line
+-- N below the cursor, `NK` above the line N above it, whichever end of the
+-- selection the cursor is on. Without one, nudge one line so repeated presses
+-- keep going. A target inside the selection fails with E134. `<C-u>` drops the
+-- range a count would put on the `:` line. Shadows visual-mode join and keyword
+-- lookup; normal-mode `J`/`K` are untouched.
+local function move_selection(down)
+  return function()
+    local cursor = vim.fn.line '.'
+    local dest
+    if vim.v.count == 0 then
+      dest = down and "'>+1" or "'<-2"
+    else
+      dest = down and cursor + vim.v.count or cursor - vim.v.count - 1
+    end
+    return ":<C-u>'<,'>m " .. dest .. '<CR>gv=gv'
+  end
+end
+vim.keymap.set('x', 'J', move_selection(true), { expr = true, desc = 'Move selection below the [count]th line down' })
+vim.keymap.set('x', 'K', move_selection(false), { expr = true, desc = 'Move selection above the [count]th line up' })
+
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
