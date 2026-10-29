@@ -2,6 +2,7 @@ local ls = require 'luasnip'
 local s = ls.snippet
 local t = ls.text_node
 local i = ls.insert_node
+local f = ls.function_node
 local c = ls.choice_node
 local d = ls.dynamic_node
 local sn = ls.snippet_node
@@ -65,6 +66,48 @@ local function clauderead_choice(pos)
   return c(pos, {
     sn(nil, { t '|& clauderead ', i(1, '/sb I ran this') }),
     t '# |& clauderead /sb I ran this',
+  })
+end
+
+-- Field |k| (1 run id, 2 start, 3 end) of a `<run_id>_<start>_<end>` scene
+-- string, split from the right the way the monorepo does (rsplit('_', 2), e.g.
+-- learning/behavior/simteacher/redrive/fan_out.py:87): run ids may hold
+-- underscores, timestamps cannot. A string that does not split gives `?`, so
+-- the timestamps fail the pbtxt parse instead of submitting a wrong window.
+local function scene_field(k)
+  return function(args)
+    return ({ args[1][1]:match '^(.+)_([^_]+)_([^_]+)$' })[k] or '?'
+  end
+end
+
+-- `simtest`'s scenarios_selector line, cycled with <C-j>/<C-k>: a USM scene
+-- set, one scene pasted as `<run_id>_<start>_<end>` and split into blob_info,
+-- or blob_info filled field by field. The pasted string stays on the line as a
+-- pbtxt comment, so the request records which scene it came from.
+local function scenarios_selector_choice(pos)
+  return c(pos, {
+    -- A USM scene set db name, not a scenario set: those are a different
+    -- oneof field and need usm_scenario_set instead.
+    sn(nil, { t 'scenarios_selector { usm_scene_set: "', i(1, 'scene set name'), t '" }' }),
+    sn(nil, {
+      t 'scenarios_selector { blob_info { run_id: "',
+      f(scene_field(1), { 1 }),
+      t '" start_timestamp: ',
+      f(scene_field(2), { 1 }),
+      t ' end_timestamp: ',
+      f(scene_field(3), { 1 }),
+      t ' } }  # ',
+      i(1, 'runid_start_end'),
+    }),
+    sn(nil, {
+      t 'scenarios_selector { blob_info { run_id: "',
+      i(1, 'run id'),
+      t '" start_timestamp: ',
+      i(2, 'start'),
+      t ' end_timestamp: ',
+      i(3, 'end'),
+      t ' } }',
+    }),
   })
 end
 
@@ -156,8 +199,8 @@ mgbazel learning/behavior/workflow/launcher.sh \
 --config_path=train_eval/train_eval_bfm_finetune.yaml \
 email=jke \
 tag={} \
-train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={}]],
-      { i(1, 'tag'), d(2, release_single_path, {}) }
+train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={} {}]],
+      { i(1, 'tag'), d(2, release_single_path, {}), clauderead_choice(3) }
     )
   ),
   -- `simtest`: submit a unified-job simtest. Unified jobs take a scene set plus
@@ -181,7 +224,7 @@ git fetch origin {} && \
 commit=$(git rp --verify origin/{}) && \
 req=$(mktemp -t simtest_req.XXXXXX.pbtxt) && cat > "$req" <<'EOF' &&
 simulations_to_run {{
-  scenarios_selector {{ usm_scene_set: "{}" }}
+  {}
   config_path: "fullstack"
   autonomy_config {{ variant: "{}" }}
   {}
@@ -200,9 +243,7 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
         -- origin/ ref here until then.
         i(3, 'branch'),
         rep(3),
-        -- A USM scene set db name, not a scenario set: those are a different
-        -- oneof field and need usm_scenario_set instead.
-        i(1, 'scene set name'),
+        scenarios_selector_choice(1),
         -- Which onboard config profile the stack runs with. No default worth
         -- baking in: unset falls back to scope12_controllable, which is rarely
         -- what you want.
