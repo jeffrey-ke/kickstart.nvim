@@ -189,25 +189,67 @@ end, { desc = '[T]oggle [S]pell' })
 -- motion); <C-f>'s only stock insert-mode job is reindenting the current line.
 vim.keymap.set('i', '<C-f>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
 
+local function put_output(code, stdout)
+  local lines = vim.split(vim.trim(stdout), '\n', { trimempty = true })
+  if code == 0 and #lines > 0 then
+    vim.api.nvim_put({ table.concat(lines, ' ') }, 'c', true, true)
+  end
+end
+
+local function command_dir(cwd)
+  local dir = cwd or vim.fn.expand '%:p:h'
+  return vim.fn.isdirectory(dir) == 1 and dir or nil
+end
+
 -- Blocks until `argv` exits. Runs from `cwd`, default the buffer's directory;
 -- stdout goes in after the cursor, lines space-joined. A nonzero exit or no
 -- output inserts nothing. See lua/README.md for the pattern.
 local function insert_command_output(argv, cwd)
-  local dir = cwd or vim.fn.expand '%:p:h'
-  local result = vim.system(argv, { cwd = vim.fn.isdirectory(dir) == 1 and dir or nil }):wait()
-  local lines = vim.split(vim.trim(result.stdout), '\n', { trimempty = true })
-  if result.code == 0 and #lines > 0 then
-    vim.api.nvim_put({ table.concat(lines, ' ') }, 'c', true, true)
-  end
+  local result = vim.system(argv, { cwd = command_dir(cwd) }):wait()
+  put_output(result.code, result.stdout)
+end
+
+-- insert_command_output for a picker that draws inline: `argv` gets a floating
+-- terminal, its stdout goes to a file, and the window closes when it exits.
+-- TMUX is unset so `fzf --tmux` falls back to drawing in that terminal.
+local function insert_terminal_output(argv, cwd)
+  local out = vim.fn.tempname()
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_create_buf(false, true)
+  local float = vim.api.nvim_open_win(buf, true, {
+    relative = 'editor',
+    row = 0,
+    col = 0,
+    width = vim.o.columns,
+    height = vim.o.lines - 1,
+    style = 'minimal',
+  })
+  vim.fn.jobstart({ 'env', '-u', 'TMUX', 'sh', '-c', '"$@" >"$0"', out, unpack(argv) }, {
+    term = true,
+    cwd = command_dir(cwd),
+    on_exit = function(_, code)
+      vim.api.nvim_win_close(float, true)
+      vim.api.nvim_buf_delete(buf, { force = true })
+      vim.api.nvim_set_current_win(win)
+      put_output(code, table.concat(vim.fn.readfile(out), '\n'))
+      os.remove(out)
+    end,
+  })
+  vim.cmd.startinsert()
 end
 
 -- The shell's fzf-git.sh pickers, keyed like its C-g bindings. `--run <picker>`
 -- opens the same popup and prints the pick, trimmed to the bare hash, branch
 -- or path. The buffer's directory picks the repo, so a file from another
--- worktree lists that worktree. A buffer outside any repo, like bash's
--- /tmp/bash-fc.* file from vi-mode `v`, falls back to nvim's cwd, which is
--- the directory the shell was in. Native <C-g> (file info) now waits out
+-- worktree lists that worktree. A buffer outside any repo, like the
+-- /tmp/lineedit.*/line.sh file from bash's vi-mode `v`, falls back to nvim's
+-- cwd, which is the directory the shell was in. Native <C-g> (file info) now waits out
 -- 'timeoutlen' first.
+--
+-- tmux cannot open a popup from inside another one: `fzf --tmux` there exits 0
+-- at once with nothing picked. That is where `v`'s editor runs, so inside a
+-- popup the picker gets a floating terminal instead. tmux sets TMUX_PANE only
+-- for a pane's processes, so TMUX without it means a popup.
 local fzf_git_script = vim.fn.expand '~/dotfiles/fzf-git.sh/fzf-git.sh'
 local function git_cwd()
   local dir = vim.fn.expand '%:p:h'
@@ -215,7 +257,8 @@ local function git_cwd()
 end
 for key, picker in pairs { b = 'branches', e = 'each_ref', f = 'files', h = 'hashes', l = 'lreflogs', r = 'remotes', s = 'stashes', t = 'tags', w = 'worktrees' } do
   vim.keymap.set('n', '<C-g>' .. key, function()
-    insert_command_output({ 'bash', fzf_git_script, '--run', picker }, git_cwd())
+    local insert = vim.env.TMUX and not vim.env.TMUX_PANE and insert_terminal_output or insert_command_output
+    insert({ 'bash', fzf_git_script, '--run', picker }, git_cwd())
   end, { desc = 'fzf-git: insert ' .. picker })
 end
 

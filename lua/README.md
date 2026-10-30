@@ -12,6 +12,12 @@ runs and gives it no terminal, but `fzf --tmux` opens a tmux popup and prints
 the pick to stdout, so it works as-is. A plain `fzf` without `--tmux` would have
 no tty to draw on.
 
+Except inside a tmux popup: tmux will not open a popup from another one, so
+`fzf --tmux` exits 0 at once with nothing picked. `insert_terminal_output(argv, cwd)`
+is the variant for there. It runs `argv` in a floating terminal with `TMUX`
+unset, so fzf draws inline, and inserts its stdout the same way once it exits.
+A popup is detectable because tmux sets `TMUX_PANE` only for a pane's processes.
+
 Adding a key:
 
 ```lua
@@ -30,5 +36,6 @@ Current users:
   `bash ~/dotfiles/fzf-git.sh/fzf-git.sh --run <picker>`. The letters match the
   shell's `C-g` bindings. They run from the buffer's directory when it is in a
   git repo, else from nvim's cwd, so they work in bash's vi-mode `v` buffer
-  (`/tmp/bash-fc.*`), where nvim's cwd is the shell's. A bare `<C-g>` (file
-  info) now waits out `timeoutlen`.
+  (`/tmp/lineedit.*/line.sh`), where nvim's cwd is the shell's. That editor
+  runs in a tmux popup, so there they take `insert_terminal_output`. A bare
+  `<C-g>` (file info) now waits out `timeoutlen`.
