@@ -58,6 +58,25 @@ local function release_single_path()
   return sn(nil, i(1, vim.json.decode(table.concat(vim.fn.readfile(meta), '\n')).single_path))
 end
 
+-- `btrain`/`bft`'s --config_path for the checkout, rooted the same way: `old`,
+-- or the replacement launcher.sh's RETIRED_CONFIGS names once it refuses
+-- `old`. Read from that table rather than tested by the replacement file
+-- existing, because a replacement can predate the retirement
+-- (train_eval_joint_ilp_mh.yaml by seven weeks). Outside the repo `old` stands.
+local function launcher_config(old)
+  local root = vim.fs.root(vim.fn.getcwd(), '.git')
+  local launcher = root and root .. '/learning/behavior/workflow/launcher.sh'
+  if launcher and vim.uv.fs_stat(launcher) then
+    for _, line in ipairs(vim.fn.readfile(launcher)) do
+      local new = line:match('%["' .. vim.pesc(old) .. '"%]="([^"]+)"')
+      if new then
+        return 'train_eval/' .. new
+      end
+    end
+  end
+  return 'train_eval/' .. old
+end
+
 -- Opt-out `|& clauderead` (.functions.sh): hand the run's output to claude,
 -- prompt editable in the live choice. Cycled with <C-j>/<C-k> to the
 -- commented-out copy. Must end the command's last line -- a backslash-continued
@@ -167,8 +186,9 @@ bazel run -c opt //behavior/core_eval/bates/scripts:submit_core_eval_comparison_
   -- and only the rlms stages interpolate it, and passing it empty would set an
   -- empty string, not restore that null. Name a project only to split runs out
   -- of the shared behavior_training one.
-  -- Expect prompts (BCE, base job, prediction eval): train_eval_bfm.yaml
-  -- enables those tasks and launcher.sh asks whenever stdin is a terminal.
+  -- The config stop is prefilled by launcher_config().
+  -- Expect prompts (BCE, base job, prediction eval): the BFM config enables
+  -- those tasks and launcher.sh asks whenever stdin is a terminal.
   -- Passing `enabled_tasks=` or `use_base_commit=` here answers them up front.
   -- `mgbazel` (.functions.sh) because launcher.sh calls the bazel binary, not
   -- the shell's bazel() wrapper, so a server it starts would escape the
@@ -182,25 +202,40 @@ mgbazel learning/behavior/workflow/launcher.sh \
 --config_path={} \
 email=jke \
 tag={}]],
-      { i(1, 'train_eval/train_eval_bfm.yaml'), i(2, 'tag') }
+      {
+        d(1, function()
+          return sn(nil, i(1, launcher_config 'train_eval_bfm.yaml'))
+        end, {}),
+        i(2, 'tag'),
+      }
     )
   ),
   -- `bft`: launch a finetune-only run from an existing model, skipping
-  -- pretrain. Same launcher and override rules as `btrain` above. The init
-  -- stop is prefilled by release_single_path(); the launcher passes it through
+  -- pretrain. Same launcher and override rules as `btrain` above. The config
+  -- comes from launcher_config() and the init stop is prefilled by
+  -- release_single_path(); the launcher passes the init path through
   -- unchecked, so a bad path only fails once train_bfm_finetune_tensorcraft
-  -- loads it.
+  -- loads it. The init key is the same under both configs: the block-based
+  -- train_eval_joint_ilp_mh_finetune stage merges
+  -- train_eval_bfm_finetune_tensorcraft (config/base/train_eval.yaml:815).
   s(
     'bft',
     fmt(
       [[
 mgbazel learning/behavior/workflow/launcher.sh \
 --model=behavior_training \
---config_path=train_eval/train_eval_bfm_finetune.yaml \
+--config_path={} \
 email=jke \
 tag={} \
 train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={} {}]],
-      { i(1, 'tag'), d(2, release_single_path, {}), clauderead_choice(3) }
+      {
+        f(function()
+          return launcher_config 'train_eval_bfm_finetune.yaml'
+        end),
+        i(1, 'tag'),
+        d(2, release_single_path, {}),
+        clauderead_choice(3),
+      }
     )
   ),
   -- `simtest`: submit a unified-job simtest. Unified jobs take a scene set plus
@@ -210,7 +245,12 @@ train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={} {
   -- in -- has no CLI flag on submit_unified_job, and --request_proto_path is
   -- the only way to set it. Tab stops are labels, not defaults, so tabbing
   -- past one leaves a command that fails loudly rather than a wrong job; the
-  -- video line is the exception and stays runnable as-is. The pbtxt braces are
+  -- variant and video lines are the exceptions and stay runnable as-is.
+  -- Every line cyclable with <C-j>/<C-k> carries a `#` comment listing its
+  -- options: on its own line above it where a continuation runs through
+  -- (a comment after `&& \` would swallow the backslash), trailing on the
+  -- last line, where clauderead's prompt words end before the `#`. The
+  -- pbtxt ones are skipped by load_pbtxt like any `#` comment. The pbtxt braces are
   -- doubled because fmt eats single ones, and fmta is not an option here: its
   -- <> delimiters collide with the shell's > and <<. Choice-node text is not
   -- run through fmt, so the override line's braces stay single.
@@ -220,14 +260,16 @@ train_eval_bfm_finetune_tensorcraft.module_params.init_model_dir_or_weights={} {
     'simtest',
     fmt(
       [[
-git fetch origin {} && \
-commit=$(git rp --verify origin/{}) && \
+# <C-j>/<C-k>: branch on origin | hash (must be on origin)
+{}
 req=$(mktemp -t simtest_req.XXXXXX.pbtxt) && cat > "$req" <<'EOF' &&
 simulations_to_run {{
+  # <C-j>/<C-k>: USM scene set | pasted runid_start_end | blob_info by field
   {}
   config_path: "fullstack"
   autonomy_config {{ variant: "{}" }}
   {}
+  # <C-j>/<C-k>: end the sim at 50 m pose divergence | never end it early
   {}
 }}
 EOF
@@ -236,18 +278,39 @@ bazel run -c opt //simulation/framework/batch_simulation/request:submit_unified_
 --commit="$commit" \
 --job_name="{}" \
 --job_type=ui \
---request_proto_path="$req" {}]],
+--request_proto_path="$req" {}  # <C-j>/<C-k>: pipe output to clauderead | don't]],
       {
-        -- A branch on origin, without the origin/ prefix. Fetched by name:
-        -- a branch pushed from another checkout or by a launcher has no
-        -- origin/ ref here until then.
-        i(3, 'branch'),
-        rep(3),
+        -- The commit to simulate, cycled with <C-j>/<C-k>. First a branch on
+        -- origin, without the origin/ prefix, fetched by name: a branch pushed
+        -- from another checkout or by a launcher has no origin/ ref here until
+        -- then. Second a hash, full or abbreviated, which the GitHub API on
+        -- origin's host resolves to the full sha -- a 404 means origin does
+        -- not have it, and the sim workers can only build what origin has.
+        -- Asked of the server because nothing local is both fast and true:
+        -- `git fetch origin <sha>` skips the server when the object is
+        -- already local, so an unpushed commit passes, and `git branch -r
+        -- --contains` walks ~112k remote refs in the monorepo, minutes.
+        -- The API also counts commits reachable only from PR refs; workers
+        -- can fetch those too.
+        c(3, {
+          sn(nil, {
+            t 'git fetch origin ',
+            i(1, 'branch'),
+            t { ' && \\', 'commit=$(git rp --verify origin/' },
+            rep(1),
+            t ') && \\',
+          }),
+          sn(nil, {
+            t 'commit=$(GH_HOST=gitent.corp.nuro.team gh api repos/Nuro-ai/Nuro/commits/',
+            i(1, 'hash'),
+            t ' --jq .sha) && \\',
+          }),
+        }),
         scenarios_selector_choice(1),
-        -- Which onboard config profile the stack runs with. No default worth
-        -- baking in: unset falls back to scope12_controllable, which is rarely
-        -- what you want.
-        i(2, 'variant'),
+        -- Which onboard config profile the stack runs with. Prefilled with
+        -- scope12_bce, the usual one; unset falls back to
+        -- scope12_controllable, which is rarely what you want.
+        i(2, 'scope12_bce'),
         -- Video config, probably do not touch. Left as the literal line rather
         -- than a label so it is runnable untouched; clear the stop to drop the
         -- video and the blank line still parses as pbtxt.
