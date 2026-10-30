@@ -189,11 +189,17 @@ end, { desc = '[T]oggle [S]pell' })
 -- motion); <C-f>'s only stock insert-mode job is reindenting the current line.
 vim.keymap.set('i', '<C-f>', '<C-g>u<Esc>[s1z=`]a<C-g>u', { desc = 'Fix previous spelling mistake' })
 
-local function put_output(code, stdout)
+-- Puts the output the way a paste does (vim.paste): after the cursor character
+-- in normal mode, like p, and at the insert point in insert mode, like <C-r>.
+local function put_output(code, stdout, insert)
   local lines = vim.split(vim.trim(stdout), '\n', { trimempty = true })
   if code == 0 and #lines > 0 then
-    vim.api.nvim_put({ table.concat(lines, ' ') }, 'c', true, true)
+    vim.api.nvim_put({ table.concat(lines, ' ') }, 'c', not insert, true)
   end
+end
+
+local function in_insert_mode()
+  return vim.api.nvim_get_mode().mode:find '^i' ~= nil
 end
 
 local function command_dir(cwd)
@@ -202,17 +208,26 @@ local function command_dir(cwd)
 end
 
 -- Blocks until `argv` exits. Runs from `cwd`, default the buffer's directory;
--- stdout goes in after the cursor, lines space-joined. A nonzero exit or no
+-- stdout goes in at the cursor, lines space-joined. A nonzero exit or no
 -- output inserts nothing. See lua/README.md for the pattern.
 local function insert_command_output(argv, cwd)
+  local insert = in_insert_mode()
   local result = vim.system(argv, { cwd = command_dir(cwd) }):wait()
-  put_output(result.code, result.stdout)
+  put_output(result.code, result.stdout, insert)
 end
 
 -- insert_command_output for a picker that draws inline: `argv` gets a floating
 -- terminal, its stdout goes to a file, and the window closes when it exits.
 -- TMUX is unset so `fzf --tmux` falls back to drawing in that terminal.
+--
+-- Called from insert mode, it has to put you back there. Terminal mode outlives
+-- the float: it ends only at the next keypress, which then runs as a normal-mode
+-- command, and a startinsert issued before that is lost. So the resume is that
+-- keypress: `i`, or `a` when the insert point was the end of the line, where the
+-- cursor will have been clamped back one character.
 local function insert_terminal_output(argv, cwd)
+  local insert = in_insert_mode()
+  local eol = vim.fn.col '.' > #vim.api.nvim_get_current_line()
   local out = vim.fn.tempname()
   local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_create_buf(false, true)
@@ -231,8 +246,11 @@ local function insert_terminal_output(argv, cwd)
       vim.api.nvim_win_close(float, true)
       vim.api.nvim_buf_delete(buf, { force = true })
       vim.api.nvim_set_current_win(win)
-      put_output(code, table.concat(vim.fn.readfile(out), '\n'))
+      put_output(code, table.concat(vim.fn.readfile(out), '\n'), insert)
       os.remove(out)
+      if insert then
+        vim.api.nvim_feedkeys(eol and 'a' or 'i', 'n', false)
+      end
     end,
   })
   vim.cmd.startinsert()
@@ -244,7 +262,9 @@ end
 -- worktree lists that worktree. A buffer outside any repo, like the
 -- /tmp/lineedit.*/line.sh file from bash's vi-mode `v`, falls back to nvim's
 -- cwd, which is the directory the shell was in. Native <C-g> (file info) now waits out
--- 'timeoutlen' first.
+-- 'timeoutlen' first. They work in insert mode too, landing at the insert point;
+-- insert-mode <C-g>u/U/j/k are unaffected, they only wait out 'timeoutlen' if
+-- you pause after the <C-g>.
 --
 -- tmux cannot open a popup from inside another one: `fzf --tmux` there exits 0
 -- at once with nothing picked. That is where `v`'s editor runs, so inside a
@@ -256,7 +276,7 @@ local function git_cwd()
   return vim.fs.root(dir, '.git') and dir or vim.fn.getcwd()
 end
 for key, picker in pairs { b = 'branches', e = 'each_ref', f = 'files', h = 'hashes', l = 'lreflogs', r = 'remotes', s = 'stashes', t = 'tags', w = 'worktrees' } do
-  vim.keymap.set('n', '<C-g>' .. key, function()
+  vim.keymap.set({ 'n', 'i' }, '<C-g>' .. key, function()
     local insert = vim.env.TMUX and not vim.env.TMUX_PANE and insert_terminal_output or insert_command_output
     insert({ 'bash', fzf_git_script, '--run', picker }, git_cwd())
   end, { desc = 'fzf-git: insert ' .. picker })

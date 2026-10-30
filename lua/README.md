@@ -1,10 +1,12 @@
 # lua/
 
-## Normal-mode keys that insert a shell command's output
+## Keys that insert a shell command's output
 
-`insert_command_output(argv, cwd)` in `keymaps.lua` is the normal-mode, inline form of
+`insert_command_output(argv, cwd)` in `keymaps.lua` is the inline form of
 `:r !cmd`. It runs `argv` from `cwd` (default: the current buffer's directory), waits for it, and
-puts its stdout after the cursor as one line, space-joining multiple lines.
+puts its stdout as one line, space-joining multiple lines. Where it goes follows
+`vim.paste`: after the cursor character in normal mode, like `p`, and at the
+insert point in insert mode, where you stay.
 A nonzero exit or empty output inserts nothing, so cancelling a picker is a no-op.
 
 The command can be interactive if it brings its own UI. nvim blocks while it
@@ -16,12 +18,15 @@ Except inside a tmux popup: tmux will not open a popup from another one, so
 `fzf --tmux` exits 0 at once with nothing picked. `insert_terminal_output(argv, cwd)`
 is the variant for there. It runs `argv` in a floating terminal with `TMUX`
 unset, so fzf draws inline, and inserts its stdout the same way once it exits.
+From insert mode it feeds an `i` (or `a` at end of line) to get back there:
+terminal mode outlives the closed float until the next keypress, so a
+`startinsert` would be lost.
 A popup is detectable because tmux sets `TMUX_PANE` only for a pane's processes.
 
 Adding a key:
 
 ```lua
-vim.keymap.set('n', '<lhs>', function()
+vim.keymap.set({ 'n', 'i' }, '<lhs>', function()
   insert_command_output { 'cmd', 'arg', ... }
 end, { desc = '...' })
 ```
@@ -38,4 +43,5 @@ Current users:
   git repo, else from nvim's cwd, so they work in bash's vi-mode `v` buffer
   (`/tmp/lineedit.*/line.sh`), where nvim's cwd is the shell's. That editor
   runs in a tmux popup, so there they take `insert_terminal_output`. A bare
-  `<C-g>` (file info) now waits out `timeoutlen`.
+  `<C-g>` (file info) now waits out `timeoutlen`. Mapped in insert mode too;
+  insert-mode `<C-g>u`/`j`/`k` still work.
