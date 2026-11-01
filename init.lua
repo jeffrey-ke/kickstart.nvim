@@ -1760,6 +1760,11 @@ vim.keymap.set('n', '<leader>rs', reload_snippets, { desc = '[R]eload [S]nippets
 -- the session brings back its tabs, windows and buffers. Quickfix lists and undo history
 -- (undofile is off) don't survive.
 local function restart_nvim()
+  -- :restart is nvim 0.12+. Checked first, so an older nvim neither writes buffers nor a session.
+  if vim.fn.exists ':restart' ~= 2 then
+    vim.notify(('Not restarting: :restart needs nvim 0.12+, this is %s.'):format(tostring(vim.version())), vim.log.levels.WARN)
+    return
+  end
   local unnamed = {}
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.bo[buf].modified and vim.bo[buf].buftype == '' and vim.api.nvim_buf_get_name(buf) == '' then
