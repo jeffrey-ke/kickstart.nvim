@@ -36,7 +36,8 @@ end
 ---
 --- `members_for(function_node)`, optional, supplies bindings for a class body
 --- that encloses a function without containing it in the tree -- a C++ method
---- defined outside its class. It returns { {name, pos, path} } or nil, and is
+--- defined outside its class. It returns { {name, pos, path, virtual} } or nil,
+--- `virtual` carried through to the def unchanged, and is
 --- asked only about functions on the path to the reference. The members get a
 --- class scope of their own between the function and its parent, so a local
 --- still shadows a member and a member still shadows a global.
@@ -91,7 +92,14 @@ function M.collect(root, source, spec, ref, members_for)
         local class = open 'class'
         opened = opened + 1
         for _, member in ipairs(members) do
-          table.insert(defs, { name = member.name, scope = class, pos = member.pos, kind = 'bind', path = member.path })
+          table.insert(defs, {
+            name = member.name,
+            scope = class,
+            pos = member.pos,
+            kind = 'bind',
+            path = member.path,
+            virtual = member.virtual,
+          })
         end
       end
     end

@@ -80,8 +80,9 @@ definitions = function(ctx, node)
 end
 
 --- Definitions of the identifier at the 0-based (row, col) of `bufnr`, nearest
---- first, as { {row, col, name, path, import} }. `path` is set only for a
---- definition in another file; `import` only for a binding an import made.
+--- first, as { {row, col, name, path, import, virtual} }. `path` is set only
+--- for a definition in another file; `import` only for a binding an import
+--- made; `virtual` only for a C++ virtual method's declaration.
 --- {} when the buffer has no supported parser, the position is not on a
 --- variable or member name, or nothing in scope binds it.
 function M.find(bufnr, row, col)
@@ -108,7 +109,14 @@ function M.find(bufnr, row, col)
   }
   return vim.tbl_map(function(def)
     local elsewhere = def.path and def.path ~= buffer_path
-    return { row = def.pos[1], col = def.pos[2], name = def.name, path = elsewhere and def.path or nil, import = def.import }
+    return {
+      row = def.pos[1],
+      col = def.pos[2],
+      name = def.name,
+      path = elsewhere and def.path or nil,
+      import = def.import,
+      virtual = def.virtual,
+    }
   end, definitions(ctx, node))
 end
 
@@ -120,8 +128,9 @@ local function line_at(bufnr, def)
 end
 
 --- Definitions of the word under the cursor as custom.locations entries,
---- nearest first, plus the name looked up (for a list title) and whether every
---- one is an import -- a binding that only says the definition is elsewhere.
+--- nearest first, plus the name looked up (for a list title), whether every
+--- one is an import -- a binding that only says the definition is elsewhere --
+--- and whether any is a virtual method, whose overrides scopes cannot find.
 --- An empty list when there is no local definition. Loading them anywhere is
 --- the caller's job -- see custom.locations.load.
 function M.at_cursor()
@@ -140,7 +149,10 @@ function M.at_cursor()
   local imported = #found > 0 and vim.iter(found):all(function(def)
     return def.import
   end)
-  return locations, found[1] and found[1].name, imported
+  local virtual = vim.iter(found):any(function(def)
+    return def.virtual
+  end)
+  return locations, found[1] and found[1].name, imported, virtual
 end
 
 return M

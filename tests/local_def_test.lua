@@ -476,6 +476,40 @@ class S {
 void S::a() { b(); }
 ]], { 'b', 2 }, { { 'b', 1 } })
 
+do
+  -- Each method of S is called once from S::run; `k` is a data member.
+  local src = vim.trim [[
+class S {
+ public:
+  virtual void pure(int x) = 0;
+  void over() override;
+  void fin() final;
+  virtual void base();
+  void plain();
+  static int k = 0;
+  void run();
+};
+void S::run() { pure(1); over(); fin(); base(); plain(); use(k); }
+]]
+  local lines = vim.split(src, '\n')
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].filetype = 'cpp'
+  local function virtual(name)
+    local pos = at(lines, name, 2)
+    return vim.tbl_map(function(def)
+      return def.virtual or false
+    end, local_def.find(bufnr, pos[1], pos[2]))
+  end
+  check('virtual: pure', virtual 'pure', { true })
+  check('virtual: override', virtual 'over', { true })
+  check('virtual: final', virtual 'fin', { true })
+  check('virtual: keyword', virtual 'base', { true })
+  check('virtual: a plain method is not', virtual 'plain', { false })
+  check('virtual: a data member initialized to 0 is not', virtual 'k', { false })
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+end
+
 case('c++: only the named class counts, not a same-named method elsewhere', 'cpp', [[
 class S { void a(); void b(); };
 class T { void b(); };

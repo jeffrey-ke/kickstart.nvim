@@ -760,8 +760,12 @@ end
 
 -- A `.h` is filetype `c` or `cpp` depending on detection, and rg's `c` type does
 -- not cover `*.cc` -- pass both so a search started in a header still reaches the
--- definition in the source file. Four alternatives:
+-- definition in the source file. `.proto` is searched too: a message or service
+-- used from C++ is defined only there, its class generated into a `.pb.h` under
+-- bazel-bin. Five alternatives:
 --   1. A function at column 0: a free function, or a method defined out of line.
+--      The name itself may start the line, when a long return type wraps onto
+--      the line above: `ExecutionGraph::Handle<...>` then `AddFooNode(`.
 --   2. A type, whose name is never followed by `(`; `[^;]*$` drops forward
 --      declarations like `class Foo;`. Indented too, for a nested type.
 --   3. A member declared or defined inside a class body, which Google style
@@ -771,13 +775,14 @@ end
 --      (`  Foo(int);`) is left out: it reads exactly like a call statement.
 --   4. A type alias: `using Foo =`, whose target often wraps onto the next
 --      line, or `typedef Bar Foo;`, where the name comes last.
+--   5. A proto `message Foo {` or `service Foo {`; a proto enum is caught by 2.
 -- The statement keywords alternative 3 still admits (`return F(x);`) are
 -- dropped after the search by rank.without_statements, which spares a `using`
 -- or `typedef` line only when it declares NAME; excluding them here needs a
 -- lookahead, which costs PCRE2 and ~3x the search time.
 local cpp_definition = {
-  types = { 'c', 'cpp' },
-  pattern = [=[^([\w:<>~].*\bNAME\s*\(|\s*(class|struct|union|enum(\s+class)?)\s+NAME\b[^;]*$|\s+[\w:\[][\w:<>,&*\[\] ]*[\w>&*\]][\s&*]+~?NAME\s*\(|\s*using\s+NAME\s*=|\s*typedef\b.*\bNAME\s*;)]=],
+  types = { 'c', 'cpp', 'proto' },
+  pattern = [=[^(([\w:<>~].*)?\bNAME\s*\(|\s*(class|struct|union|enum(\s+class)?)\s+NAME\b[^;]*$|\s+[\w:\[][\w:<>,&*\[\] ]*[\w>&*\]][\s&*]+~?NAME\s*\(|\s*using\s+NAME\s*=|\s*typedef\b.*\bNAME\s*;|\s*(message|service)\s+NAME\b)]=],
 }
 
 -- A definition pattern encodes a language's formatting convention, not its
@@ -911,7 +916,9 @@ end
 --
 --   1. Scope resolution. A local variable is defined in this file, and only
 --      its enclosing scopes know which of the same-named bindings it means.
---      A C++ `obj.x` goes through the class `obj` is declared as.
+--      A C++ `obj.x` goes through the class `obj` is declared as. A C++
+--      virtual method skips to the grep: scopes find only the declaration,
+--      and its overrides can be in any subclass. The grep finds both.
 --   2. Python: jedi, for what scopes cannot see -- an attribute, or a name an
 --      import binds, which says only that the definition is in another file.
 --   3. The import line itself, when jedi cannot follow it: the module is not
@@ -926,7 +933,10 @@ local function definition_at_cursor(open_list)
   local cursor = vim.api.nvim_win_get_cursor(win)
   local word = vim.fn.expand '<cword>'
   local query = definition_query(word, '.')
-  local found, name, imported = require('custom.local_def').at_cursor()
+  local found, name, imported, virtual = require('custom.local_def').at_cursor()
+  if virtual then
+    return grep_into_loclist(query, open_list, bodies_first(word))
+  end
 
   local function scope_or_grep()
     if not locations.load(found, { win = win, title = 'local definition of ' .. (name or ''), open = open_list and #found > 1 }) then

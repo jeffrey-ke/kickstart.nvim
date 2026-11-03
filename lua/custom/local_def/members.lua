@@ -201,6 +201,36 @@ local function names_method(identifier, declaration)
   return false
 end
 
+-- A virtual method's declaration names one of possibly many bodies: the call
+-- dispatches on the object's dynamic type, and an override can live in any
+-- subclass anywhere. Virtual by the `virtual` keyword, by `override` or
+-- `final` (a virtual_specifier on the declarator), or by a pure `= 0`, which
+-- an override may write without either. Only asked of a method: `static int
+-- k = 0;` is a data member with the same `= 0`.
+local function names_virtual(identifier, declaration, source)
+  for i = 0, declaration:child_count() - 1 do
+    if declaration:child(i):type() == 'virtual' then
+      return true
+    end
+  end
+  local pure = field(declaration, 'default_value')
+  if pure and text(pure, source) == '0' then
+    return true
+  end
+  local up = identifier:parent()
+  while up and not up:equal(declaration) do
+    if up:type() == 'function_declarator' then
+      for i = 0, up:named_child_count() - 1 do
+        if up:named_child(i):type() == 'virtual_specifier' then
+          return true
+        end
+      end
+    end
+    up = up:parent()
+  end
+  return false
+end
+
 local function members_named(class, unit, member)
   local found = {}
   local declare = languages.cpp.extractors.field_declaration
@@ -210,11 +240,13 @@ local function members_named(class, unit, member)
     if child:type() == 'field_declaration' then
       declare(child, function(identifier)
         if text(identifier, unit.source) == member then
+          local method = names_method(identifier, child)
           found[#found + 1] = {
             name = member,
             pos = { identifier:start() },
             path = unit.path,
-            method = names_method(identifier, child),
+            method = method,
+            virtual = method and names_virtual(identifier, child, unit.source),
           }
         end
       end)
@@ -300,7 +332,8 @@ end
 --- Declarations of `member` in class `class_name` or its bases, looked up from
 --- `unit`, as { {name, pos, path} }; nil when the class cannot be found, so the
 --- caller knows no class scope applies. For a method, its out-of-line
---- definitions come first, then the declaration.
+--- definitions come first, then the declaration, flagged `virtual` when calls
+--- to it dispatch to bodies this lookup cannot see.
 function M.lookup(class_name, member, unit, io)
   local seen = {}
   local function search(name, from, depth)
