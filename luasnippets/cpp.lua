@@ -5,6 +5,7 @@ local i = ls.insert_node
 local f = ls.function_node
 local fmt = require('luasnip.extras.fmt').fmt
 local postfix = require('luasnip.extras.postfix').postfix
+local events = require 'luasnip.util.events'
 
 -- Every trigger starts with `;`, the same prefix as python.lua and markdown.lua,
 -- so the short triggers below can be autosnippets without firing inside
@@ -15,7 +16,8 @@ local postfix = require('luasnip.extras.postfix').postfix
 --
 -- Triggers must stay prefix-free: an autosnippet fires the moment its trigger
 -- matches, so adding `sva` next to `sv` would make `sva` unreachable. That is
--- why namespace-only expansions end in `:` and variant is `sx`.
+-- why namespace-only expansions end in `:` and variant is `sx`. Where one
+-- expansion really should extend another (`;ca` / `;car`), use `tree` below.
 local P = ';'
 
 -- Skip comments and strings, where `;so` is prose rather than a request for a
@@ -61,12 +63,43 @@ local function wrap(trig, pre, post)
   })
 end
 
+-- A prefix tree of autosnippets. `;ca` and `;car` cannot both be triggers,
+-- since `;ca` fires before the `r` arrives. Instead `;ca` expands to
+-- `const auto` and records where that text ends; the child keyed `r` has the
+-- trigger `const autor` and fires only when the `r` was typed right at that
+-- spot. So `;car` gives `const auto&`, while `const author` typed by hand,
+-- or an `r` typed after moving away and back, is left alone.
+-- `children` maps a key to `{ text, children }`, so trees nest.
+local tip -- { buf, row, col } just past the last tree expansion, 0-indexed
+local function tree(trig, condition, text, children)
+  local function record_tip(_, args)
+    local row, col = unpack(args.expand_pos)
+    tip = { buf = vim.api.nvim_get_current_buf(), row = row, col = col + #text }
+  end
+  local snips = {
+    s({ trig = trig, condition = condition, desc = text }, t(text), { callbacks = { [-1] = { [events.pre_expand] = record_tip } } }),
+  }
+  for key, child in pairs(children or {}) do
+    local function at_tip(line_to_cursor)
+      return tip ~= nil
+        and tip.buf == vim.api.nvim_get_current_buf()
+        and tip.row == vim.api.nvim_win_get_cursor(0)[1] - 1
+        and #line_to_cursor == tip.col + #key
+    end
+    vim.list_extend(snips, tree(text .. key, at_tip, child[1], child[2]))
+  end
+  return snips
+end
+
 local autosnippets = {
   -- Namespace prefixes.
   auto('s:', t 'std::'),
   auto('r:', t 'std::ranges::'),
   auto('v:', t 'std::views::'),
   auto('a:', t 'absl::'),
+
+  -- Core language. `const auto` / `const auto&` are the tree after this table.
+  auto('l', fmt('[{}]({}) {{ {}; }}', { i(1), i(2), i(3) }), 'lambda'),
 
   -- std types and helpers.
   auto('so', fmt('std::optional<{}>', { i(1) })),
@@ -116,5 +149,7 @@ local autosnippets = {
   wrap('v', 'std::vector<', '>'),
   wrap('m', 'std::move(', ')'),
 }
+
+vim.list_extend(autosnippets, tree(P .. 'ca', in_code, 'const auto', { r = { 'const auto&' } }))
 
 return {}, autosnippets
