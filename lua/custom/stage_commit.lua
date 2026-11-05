@@ -7,6 +7,9 @@
 --   gu   undo the last commit, keeping its changes staged; refuses once pushed
 --   gd   :Gvdiffsplit on the command line, waiting for a revision
 --   gq   toggle diff mode in every window of the tab, flipping the current window's state
+--   gr   reset the hunk at the cursor, or the selected lines   gR  reset the whole buffer
+--   gp   preview the hunk in a popup      gb  blame the current line
+--   ]c [c  next / previous hunk (vim's native diff jumps in diff mode)
 
 local M = {}
 
@@ -328,6 +331,37 @@ function M.setup()
   -- Left on the command line: type a revision, or <CR> alone to diff against the index.
   map('n', '<leader>gd', ':Gvdiffsplit ', 'Git vdiff against a revision')
   map('n', '<leader>gq', M.toggle_diff, 'Diff mode toggle for every window of the tab')
+
+  map('n', '<leader>gr', function()
+    require('gitsigns').reset_hunk()
+  end, 'Git reset hunk')
+  map('x', '<leader>gr', function()
+    require('gitsigns').reset_hunk { vim.fn.line '.', vim.fn.line 'v' }
+  end, 'Git reset selected lines')
+  map('n', '<leader>gR', function()
+    require('gitsigns').reset_buffer()
+  end, 'Git reset buffer')
+  map('n', '<leader>gp', function()
+    require('gitsigns').preview_hunk()
+  end, 'Git preview hunk')
+  map('n', '<leader>gb', function()
+    require('gitsigns').blame_line()
+  end, 'Git blame line')
+  -- In diff mode, keep vim's native ]c/[c.
+  map('n', ']c', function()
+    if vim.wo.diff then
+      vim.cmd.normal { ']c', bang = true }
+    else
+      require('gitsigns').nav_hunk 'next'
+    end
+  end, 'Next git hunk')
+  map('n', '[c', function()
+    if vim.wo.diff then
+      vim.cmd.normal { '[c', bang = true }
+    else
+      require('gitsigns').nav_hunk 'prev'
+    end
+  end, 'Previous git hunk')
 end
 
 return M
