@@ -15,6 +15,12 @@ return {
   opts = {
     picker = 'telescope',
     enable_builtin = true,
+    mappings = {
+      submit_win = {
+        -- The default <C-m> arrives as <CR> through tmux, so it never fires.
+        comment_review = { lhs = '<localleader>sc' },
+      },
+    },
   },
   config = function(_, opts)
     require('octo').setup(opts)
