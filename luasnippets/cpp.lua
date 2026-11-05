@@ -17,7 +17,7 @@ local events = require 'luasnip.util.events'
 -- Triggers must stay prefix-free: an autosnippet fires the moment its trigger
 -- matches, so adding `sva` next to `sv` would make `sva` unreachable. That is
 -- why namespace-only expansions end in `:` and variant is `sx`. Where one
--- expansion really should extend another (`;ca` / `;car`), use `tree` below.
+-- expansion really should extend another (`;c` / `;ca` / `;car`), use `tree` below.
 local P = ';'
 
 -- Skip comments and strings, where `;so` is prose rather than a request for a
@@ -98,7 +98,7 @@ local autosnippets = {
   auto('v:', t 'std::views::'),
   auto('a:', t 'absl::'),
 
-  -- Core language. `const auto` / `const auto&` are the tree after this table.
+  -- Core language. `const` / `const auto` / `const auto&` are the tree after this table.
   auto('l', fmt('[{}]({}) {{ {}; }}', { i(1), i(2), i(3) }), 'lambda'),
 
   -- std types and helpers.
@@ -150,6 +150,7 @@ local autosnippets = {
   wrap('m', 'std::move(', ')'),
 }
 
-vim.list_extend(autosnippets, tree(P .. 'ca', in_code, 'const auto', { r = { 'const auto&' } }))
+-- ;c -> const, ;ca -> const auto, ;car -> const auto&
+vim.list_extend(autosnippets, tree(P .. 'c', in_code, 'const', { a = { 'const auto', { r = { 'const auto&' } } } }))
 
 return {}, autosnippets
